@@ -164,6 +164,7 @@ MyApp::ScheduleTx (void)
 static void
 CwndChange (uint32_t oldCwnd, uint32_t newCwnd)
 {
+  
   NS_LOG_UNCOND (Simulator::Now ().GetSeconds () << "\t" << newCwnd);
 }
 
@@ -216,7 +217,7 @@ main (int argc, char *argv[])
   int nPackets1 = 1000;
   string dataRate1 = "10Mbps";
   app->Setup (ns3TcpSocket, sinkAddress, 1040, 1000, DataRate (dataRate1));
-  fstream out("tcp_out.txt",ios::out | ios::app);
+  fstream out("tcp_out.txt",ios::out);
   out << packetSize1 << " " << nPackets1 << " " << dataRate1 << endl;
   out.close();
 

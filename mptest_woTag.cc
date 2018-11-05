@@ -97,11 +97,13 @@ double total_capacity = 0;
 
 // for RTT record
 // vector< vector<double> > rtt;
-double **rtt;
-int tagScale = (int) 1e3;
-map<int, map<int, bool>> tagMap;
 vector<string> fileName;
 double tPkt[ARRAY_SIZE];
+bool isPrintHeader;
+bool isPrintTx;
+bool isPrintLeft;
+bool isPrintRx;
+bool firstRtt = true;
 
 // log component definition
 NS_LOG_COMPONENT_DEFINE ("TestForMiddlePolice");
@@ -111,7 +113,6 @@ std::ofstream windowFile ("natural_flat_window.data", std::ios::out);
 std::ofstream lossRateFile ("natural_flat_LR.data", std::ios::out);
 
 // tool function
-
 string 
 printPkt(Ptr <const Packet> p)
 {
@@ -131,33 +132,33 @@ logIpv4Header (Ptr<const Packet> p)
   pktCopy->PeekHeader (ipH); /// need to know the exact structure of header
   stringstream ss;
   ipH.Print (ss);
-  return ss.str();
+  return ss.str ();
 }
 
 string
-logPppHeader(Ptr<const Packet> p )
+logPppHeader (Ptr<const Packet> p)
 {
-  Ptr<Packet> pktCopy = p->Copy();
+  Ptr<Packet> pktCopy = p->Copy ();
   PppHeader pppH;
-  pktCopy->PeekHeader(pppH);
+  pktCopy->PeekHeader (pppH);
   stringstream ss;
-  pppH.Print(ss);
-  return ss.str();
+  pppH.Print (ss);
+  return ss.str ();
 }
 
 string
-logTcpHeader(Ptr<const Packet> p)
+logTcpHeader (Ptr<const Packet> p)
 {
-  Ptr<Packet> pktCopy = p->Copy();
+  Ptr<Packet> pktCopy = p->Copy ();
   PppHeader pppH;
   Ipv4Header ipH;
   TcpHeader tcpH;
-  pktCopy->RemoveHeader(pppH);
-  pktCopy->RemoveHeader(ipH);
-  pktCopy->PeekHeader(tcpH);
+  pktCopy->RemoveHeader (pppH);
+  pktCopy->RemoveHeader (ipH);
+  pktCopy->PeekHeader (tcpH);
   stringstream ss;
-  tcpH.Print(ss);
-  return ss.str();
+  tcpH.Print (ss);
+  return ss.str ();
 }
 
 string
@@ -172,7 +173,7 @@ logPktIpv4Address (Ptr<const Packet> p)
   ipH.GetSource ().Print (ss);
   ss << " > ";
   ipH.GetDestination ().Print (ss);
-  return ss.str();
+  return ss.str ();
 }
 
 //=========================================================================//
@@ -274,7 +275,6 @@ private:
   bool m_running;
   //uint32_t        m_packetsSent;
   uint32_t m_tagValue;
-  uint32_t m_cnt; // count of packet sent by this app
 };
 
 MyApp::MyApp ()
@@ -286,8 +286,7 @@ MyApp::MyApp ()
       m_sendEvent (),
       m_running (false),
       //m_packetsSent (0)
-      m_tagValue (0),
-      m_cnt (1)
+      m_tagValue (0)
 {
 }
 
@@ -350,28 +349,19 @@ int txCnt = 0;
 void
 MyApp::SendPacket (void)
 {
-  //create the tags
   MyTag tag;
-
-  // 2nd: add for tag for m_tagValue
-  // tag.SetSimpleValue(m_tagValue);
-  tag.SetSimpleValue (m_tagValue * tagScale + m_cnt);
-  rtt[m_tagValue][m_cnt++] = Simulator::Now ().GetSeconds ();
-
-  stringstream ss;
-  ss << "TX: " << Simulator::Now ().GetSeconds () << " s: " << m_tagValue << ". " << m_cnt - 1
-     << " ; total: " << ++txCnt;
-  NS_LOG_INFO (ss.str ());
+  tag.SetSimpleValue (m_tagValue);
 
   Ptr<Packet> packet = Create<Packet> (m_packetSize);
   packet->AddPacketTag (tag); //add tags
-
   m_socket->Send (packet);
-
-  //if (++m_packetsSent < m_nPackets)
-  //{
   ScheduleTx ();
-  //}
+
+  stringstream ss;
+  ss << "TX: " << Simulator::Now ().GetSeconds () << " s: " << m_tagValue // << ". " << m_cnt - 1
+     << " ; total: " << ++txCnt;
+  if (isPrintTx)
+    NS_LOG_INFO (ss.str ());
 }
 
 void
@@ -451,29 +441,19 @@ PktArrival (Ptr<const Packet> p)
       /// logging header/address
 
       // compatible with the setting
-      // uint32_t index = tag.GetSimpleValue() - 1;
-      uint32_t index = tag.GetSimpleValue () / tagScale;
-      uint32_t cnt = tag.GetSimpleValue () % tagScale;
-
-      if (tagMap[index].find (cnt) == tagMap[index].end ())
-        {
-          double tmp = Simulator::Now ().GetSeconds () - rtt[index][cnt];
-          // cout << Simulator::Now().GetSeconds() << " " << index << ". " << cnt << " : " << rtt[index][cnt] << " s, " << tmp << " s. " << endl;
-          rtt[index][cnt] = tmp;
-          tagMap[index][cnt] = true; // avoid repeated which I don't know why
-        }
+      uint32_t index = tag.GetSimpleValue () - 1;
 
       receiveWin[index] += 1;
       double ttemp = Simulator::Now ().GetSeconds ();
       stringstream ss;
       // if(!index)
-      ss << "- RX: " << Simulator::Now ().GetSeconds () << " : " << index << ". " << cnt
-         << " : rt pkt time = " << ttemp - tPkt[index] << " s ; total(tag): " << ++rxTagCnt
-         << " ; total: " << rxCnt;
-      NS_LOG_INFO (ss.str () + "; " + logPktIpv4Address(p));
-      // NS_LOG_INFO ("- TCP Header: " + logTcpHeader(p));
-      NS_LOG_INFO (printPkt(p));
-      
+      ss << "- RX: " << Simulator::Now ().GetSeconds () << " : " << index + 1 // << ". " << cnt
+         << " : rt pkt time = " << ttemp - tPkt[index] << " s ; pkt size: " << p->GetSize();
+      if (isPrintRx)
+        NS_LOG_INFO (ss.str () + "; " + logPktIpv4Address (p));
+      if (isPrintHeader)
+        // NS_LOG_INFO ("- TCP Header: " + logTcpHeader (p));
+        NS_LOG_INFO (printPkt(p));
 
       tPkt[index] = ttemp;
 
@@ -535,8 +515,8 @@ PktArrival (Ptr<const Packet> p)
                << "; drop window: " << dropArray[j] << "; realtime loss: " << realtimeLossRate
                << endl;
           // fout[j] << Simulator::Now().GetSeconds() << " " << congWin[j] << endl;
-          fout[j] << Simulator::Now ().GetSeconds () << " " << congWin[j] * 8 / period
-                  << endl; // output the ephermal data rate (omit pkt size 1kbit)
+          fout[j] << Simulator::Now ().GetSeconds () << " " << congWin[j] * 8 / period << " kbps"
+                  << endl; // output the ephermal data rate (omit pkt size 1kB)
         }
       if (windowFile.is_open ())
         windowFile << endl;
@@ -564,22 +544,18 @@ PktArrivalLeft (Ptr<const Packet> p)
   if (pktCopy->PeekPacketTag (tag)) // if find a tag
     {
       // compatible with the setting
-      // uint32_t index = tag.GetSimpleValue() - 1;
-      uint32_t index = tag.GetSimpleValue () / tagScale;
-      uint32_t cnt = tag.GetSimpleValue () % tagScale;
+      uint32_t index = tag.GetSimpleValue () - 1;
 
-      if (tagMap[index].find (cnt) == tagMap[index].end ())
-        {
-          double tmp = Simulator::Now ().GetSeconds () - rtt[index][cnt];
-          // cout << Simulator::Now().GetSeconds() << " " << index << ". " << cnt << " : " << rtt[index][cnt] << " s, " << tmp << " s. " << endl;
-          rtt[index][cnt] = tmp;
-          tagMap[index][cnt] = true; // avoid repeated which I don't know why
-        }
       stringstream ss;
-      ss << "   Left router: " << Simulator::Now ().GetSeconds () << ": " << index << ". " << cnt
+      ss << "   Left router: " << Simulator::Now ().GetSeconds () << ": " << index + 1
+         << ". " // << cnt
          << " ; total(tag): " << ++pktTagLeft << " ; total: " << pktLeft;
-      NS_LOG_INFO (ss.str () + "; " + logPktIpv4Address(p));
-      // NS_LOG_INFO ("- TCP Header: " + logTcpHeader(p));
+      if (isPrintLeft)
+        NS_LOG_INFO (ss.str () + "; " + logPktIpv4Address (p));
+      if (isPrintHeader)
+        // NS_LOG_INFO ("- TCP Header: " + logTcpHeader (p));
+        // NS_LOG_INFO ("- IP header: " + logIpv4Header(p));
+        NS_LOG_INFO (printPkt(p));
     }
 }
 
@@ -615,6 +591,20 @@ PktDropOverflow (Ptr<const Packet> p)
   cout << "Dropping for overflow" << endl;
 }
 
+static void
+RttTracer (Time oldval, Time newval)
+{
+  stringstream ss;
+  if (firstRtt)
+    {
+      ss << "0.0 " << oldval.GetSeconds () << std::endl;
+      firstRtt = false;
+    }
+  ss << Simulator::Now ().GetSeconds () << " " << newval.GetSeconds () << std::endl;
+  cout << ss.str() << endl;
+}
+
+
 //===========================Main Function=============================//
 int
 main (int argc, char *argv[])
@@ -625,6 +615,10 @@ main (int argc, char *argv[])
   double maxTh = 200;
   uint32_t pktSize = 1000; // 1000 KB
   double stopTime = 10;
+  isPrintHeader = false; // if print tcp header
+  isPrintTx = false;
+  isPrintLeft = false;
+  isPrintRx = true;
 
   string appDataRate = "1Mbps"; // no use here
   string queueType = "DropTail";
@@ -641,13 +635,6 @@ main (int argc, char *argv[])
     {
       fileName.push_back ("wndOutput_" + to_string (i) + ".dat");
       remove (fileName[i].c_str ());
-    }
-
-  // allocate space for rtt
-  rtt = new double *[max (nLeft, nRight)];
-  for (int i = 0; i < max (nLeft, nRight); i++)
-    {
-      rtt[i] = new double[10000]; // easy to overflow
     }
 
   // initialize tPkt
@@ -813,11 +800,10 @@ main (int argc, char *argv[])
           InetSocketAddress (d1.GetLeftIpv4Address (i % nLeft),
                              port)); /// send to i th left node, map right node to left node
       Ptr<MyApp> app = CreateObject<MyApp> ();
-      uint32_t tagValue = i; //take the least significant 8 bits
+      uint32_t tagValue = i + 1; //take the least significant 8 bits
 
       // 2nd line for idtentify each packet to get the RTT
       app->SetTagValue (tagValue);
-      tagMap[i] = map<int, bool> ();
 
       app->Setup (ns3Socket, sinkAddress, pktSize, DataRate (clientDataRate));
       d1.GetRight (i)->AddApplication (app);
@@ -863,6 +849,7 @@ main (int argc, char *argv[])
                                                                   MakeCallback (&PktDrop));
           rightRouter->GetDevice (i)->TraceConnectWithoutContext ("PhyRxDrop",
                                                                   MakeCallback (&PktDropOverflow));
+        //   Simulator::Schedule (Seconds (0.00001), &TraceRtt, "mptest-rtt.data");
           p2pDevice = DynamicCast<PointToPointNetDevice> (router->GetDevice (i));
         }
       bottleNeckLink.EnablePcap (
@@ -874,6 +861,9 @@ main (int argc, char *argv[])
       leftRouter->GetDevice (i)->TraceConnectWithoutContext ("PhyRxDrop",
                                                              MakeCallback (&PktDropOverflowLeft));
     }
+  Config::ConnectWithoutContext ("/NodeList/1/$ns3::TcpL4Protocol/SocketList/0/RTT",
+                                 MakeCallback (&RttTracer));
+
   //===========================================================================//
 
   // Routing table
@@ -914,7 +904,7 @@ main (int argc, char *argv[])
   double total_index =
       totalCounter * totalCounter / totalCounterSquare / nRight; /// what's the meaning?
 
-  cout << endl << "Final bytes: " << totalCounter << "; av rate: " << normalAverageRate << endl;
+  cout << endl << "Final bytes: " << totalCounter << " Mbit; av rate: " << normalAverageRate << endl;
 
   //output to a file
   std::ofstream outputFile ("samerate", std::ios::out | std::ios::app);
