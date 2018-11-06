@@ -73,8 +73,7 @@ uint32_t dropArray[ARRAY_SIZE];
 uint32_t congWin[ARRAY_SIZE];
 //uint32_t verifyWin[5000]; // representing the verified capabilities
 //uint32_t tagWin[5000]; // representing the tagged packets
-uint32_t receiveWin
-    [ARRAY_SIZE]; // representing the received packets (usage)   /// rwnd: RX's largest # packets it can receive without ACK, actual # packets = min (rwnd, cwnd)
+uint32_t receiveWin[ARRAY_SIZE]; // representing the received packets (usage)   /// rwnd: RX's largest # packets it can receive without ACK, actual # packets = min (rwnd, cwnd)
 uint16_t enableEarlyDrop = 1;
 uint32_t bootStrap = 0;
 
@@ -99,6 +98,7 @@ double total_capacity = 0;
 // vector< vector<double> > rtt;
 vector<string> fileName;
 double tPkt[ARRAY_SIZE];
+uint32_t recvData[ARRAY_SIZE];  // record tcp data for rate calculation
 bool isPrintHeader;
 bool isPrintTx;
 bool isPrintLeft;
@@ -113,6 +113,19 @@ std::ofstream windowFile ("natural_flat_window.data", std::ios::out);
 std::ofstream lossRateFile ("natural_flat_LR.data", std::ios::out);
 
 // tool function
+
+uint32_t getTcpSize(Ptr <const Packet> p)
+{
+  Ptr<Packet> pktCopy = p->Copy();
+  PppHeader pppH;
+  Ipv4Header ipH;
+  TcpHeader tcpH;
+  pktCopy->RemoveHeader(pppH);
+  pktCopy->RemoveHeader(ipH);
+  pktCopy->RemoveHeader(tcpH);
+  return pktCopy->GetSize();
+}
+
 string 
 printPkt(Ptr <const Packet> p)
 {
@@ -400,6 +413,7 @@ clearArray ()
       //std::cout << "client no: " << j << "; arrived: "<< receiveWin[j] << "; drop rate: " << 1.0 * dropArray[j] / receiveWin[j] << std::endl;
       receiveWin[j] = 0;
       dropArray[j] = 0;
+      recvData[j] = 0;
     }
   total_capacity = 0;
 }
@@ -456,7 +470,8 @@ PktArrival (Ptr<const Packet> p)
         NS_LOG_INFO (printPkt(p));
 
       tPkt[index] = ttemp;
-
+      recvData[index] += getTcpSize(p);
+      
       if (++realtimePeriod ==
           realtimePacketFeedback) // calculating a real-time loss rate every 50 packets
         {
@@ -515,7 +530,7 @@ PktArrival (Ptr<const Packet> p)
                << "; drop window: " << dropArray[j] << "; realtime loss: " << realtimeLossRate
                << endl;
           // fout[j] << Simulator::Now().GetSeconds() << " " << congWin[j] << endl;
-          fout[j] << Simulator::Now ().GetSeconds () << " " << congWin[j] * 8 / period << " kbps"
+          fout[j] << Simulator::Now ().GetSeconds () << " " << recvData[j] * 8.0 / period /1000 << " kbps"
                   << endl; // output the ephermal data rate (omit pkt size 1kB)
         }
       if (windowFile.is_open ())
@@ -618,7 +633,7 @@ main (int argc, char *argv[])
   isPrintHeader = false; // if print tcp header
   isPrintTx = false;
   isPrintLeft = false;
-  isPrintRx = true;
+  isPrintRx = false;
 
   string appDataRate = "1Mbps"; // no use here
   string queueType = "DropTail";
@@ -830,6 +845,7 @@ main (int argc, char *argv[])
       congWin[j] = 0;
       receiveWin[j] = 0;
       lossRateArray[j] = 0;
+      recvData[j] = 0;
     }
   //=============================Trace source============================//
   router = d1.GetRight ();
@@ -904,7 +920,7 @@ main (int argc, char *argv[])
   double total_index =
       totalCounter * totalCounter / totalCounterSquare / nRight; /// what's the meaning?
 
-  cout << endl << "Final bytes: " << totalCounter << " Mbit; av rate: " << normalAverageRate << endl;
+  cout << endl << "Final bytes: " << totalCounter << " Mbit; mean rate: " << normalAverageRate * 1000 << " kbps" << endl;
 
   //output to a file
   std::ofstream outputFile ("samerate", std::ios::out | std::ios::app);
