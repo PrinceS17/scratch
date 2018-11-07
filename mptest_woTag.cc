@@ -48,7 +48,7 @@ using namespace ns3;
 
 std::string attackerDataRate = "30Mbps";
 std::string clientDataRate = "0.1Mbps";
-double period = 1; // will it influence the cwnd / rwnd value?
+double period = 0.5; // will it influence the cwnd / rwnd value?
 double duration = period / 1;
 uint16_t port = 5001;
 uint16_t attackerport = 5003;
@@ -98,7 +98,10 @@ double total_capacity = 0;
 // vector< vector<double> > rtt;
 vector<string> fileName;
 double tPkt[ARRAY_SIZE];
-uint32_t recvData[ARRAY_SIZE];  // record tcp data for rate calculation
+int txCnt[ARRAY_SIZE];
+int rxCnt[ARRAY_SIZE];
+double recvData[ARRAY_SIZE];  // record tcp data for rate calculation
+double recvBit[ARRAY_SIZE];   // record p2p packet size 
 bool isPrintHeader;
 bool isPrintTx;
 bool isPrintLeft;
@@ -113,6 +116,24 @@ std::ofstream windowFile ("natural_flat_window.data", std::ios::out);
 std::ofstream lossRateFile ("natural_flat_LR.data", std::ios::out);
 
 // tool function
+
+vector<int> getPktSizes(Ptr <const Packet> p)     // get [p2p size, ip size, tcp size, data size]
+{
+  Ptr<Packet> pktCopy = p->Copy();
+  vector<int> res;
+  PppHeader pppH;
+  Ipv4Header ipH;
+  TcpHeader tcpH;
+
+  res.push_back((int)pktCopy->GetSize());
+  pktCopy->RemoveHeader(pppH);
+  res.push_back((int)pktCopy->GetSize());
+  pktCopy->RemoveHeader(ipH);
+  res.push_back((int)pktCopy->GetSize());
+  pktCopy->RemoveHeader(tcpH);
+  res.push_back((int)pktCopy->GetSize());
+  return res;
+}
 
 uint32_t getTcpSize(Ptr <const Packet> p)
 {
@@ -357,8 +378,6 @@ MyApp::StopApplication (void)
     }
 }
 
-int txCnt = 0;
-
 void
 MyApp::SendPacket (void)
 {
@@ -370,11 +389,15 @@ MyApp::SendPacket (void)
   m_socket->Send (packet);
   ScheduleTx ();
 
-  stringstream ss;
-  ss << "TX: " << Simulator::Now ().GetSeconds () << " s: " << m_tagValue // << ". " << m_cnt - 1
-     << " ; total: " << ++txCnt;
-  if (isPrintTx)
-    NS_LOG_INFO (ss.str ());
+  txCnt[m_tagValue - 1] ++;
+  if(txCnt[m_tagValue - 1] % 500 == 0)
+  {
+    stringstream ss;
+    ss << "TX: " << Simulator::Now ().GetSeconds () << " s: " << m_tagValue // << ". " << m_cnt - 1
+      << " ; total: " << txCnt[m_tagValue - 1];
+    if (isPrintTx)
+      NS_LOG_INFO (ss.str ());
+  }
 }
 
 void
@@ -413,7 +436,9 @@ clearArray ()
       //std::cout << "client no: " << j << "; arrived: "<< receiveWin[j] << "; drop rate: " << 1.0 * dropArray[j] / receiveWin[j] << std::endl;
       receiveWin[j] = 0;
       dropArray[j] = 0;
-      recvData[j] = 0;
+      recvData[j] = 0.0;
+      recvBit[j] = 0.0;
+      rxCnt[j] = 0;
     }
   total_capacity = 0;
 }
@@ -440,15 +465,14 @@ slopingProb (double lossRate)
 }
 
 int rxTagCnt = 0;
-int rxCnt = 0;
 
 static void
 PktArrival (Ptr<const Packet> p)
 {
   Ptr<Packet> pktCopy = p->Copy ();
   MyTag tag;
-  rxCnt++;
   // printHeader(p);
+  vector<int> tmp = getPktSizes(p);
 
   if (pktCopy->PeekPacketTag (tag)) // if find a tag
     {
@@ -457,20 +481,23 @@ PktArrival (Ptr<const Packet> p)
       // compatible with the setting
       uint32_t index = tag.GetSimpleValue () - 1;
 
-      receiveWin[index] += 1;
+      rxCnt[index] ++;
+      receiveWin[index] ++;
       double ttemp = Simulator::Now ().GetSeconds ();
       stringstream ss;
       // if(!index)
-      ss << "- RX: " << Simulator::Now ().GetSeconds () << " : " << index + 1 // << ". " << cnt
-         << " : rt pkt time = " << ttemp - tPkt[index] << " s ; pkt size: " << p->GetSize();
+      ss << "- RX: " << Simulator::Now ().GetSeconds () << " : " << index + 1  << ". " << rxCnt[index]
+         << " : rt pkt time = " << ttemp - tPkt[index] << " s ; tcp size: " << getTcpSize(p);
       if (isPrintRx)
         NS_LOG_INFO (ss.str () + "; " + logPktIpv4Address (p));
       if (isPrintHeader)
         // NS_LOG_INFO ("- TCP Header: " + logTcpHeader (p));
         NS_LOG_INFO (printPkt(p));
 
+      
       tPkt[index] = ttemp;
-      recvData[index] += getTcpSize(p);
+      recvData[index] += (double) tmp[3] / 1000.0;   // size in KB
+      recvBit[index] += (double) tmp[0] / 1000.0;    // raw size in KB
       
       if (++realtimePeriod ==
           realtimePacketFeedback) // calculating a real-time loss rate every 50 packets
@@ -530,9 +557,13 @@ PktArrival (Ptr<const Packet> p)
                << "; drop window: " << dropArray[j] << "; realtime loss: " << realtimeLossRate
                << endl;
           // fout[j] << Simulator::Now().GetSeconds() << " " << congWin[j] << endl;
-          fout[j] << Simulator::Now ().GetSeconds () << " " << recvData[j] * 8.0 / period /1000 << " kbps"
+          cout << Simulator::Now ().GetSeconds () << ": raw: " << recvBit[j] * 8.0 / period << " kbps"
+               << "; data: " << recvData[j] * 8.0 / period << " kbps" << endl; 
+          // cout << "  = pkt sizes: " << tmp[0] << " " << tmp[1] << " " << tmp[2] << " " << tmp[3] << endl;
+          fout[j] << Simulator::Now ().GetSeconds () << " " << recvData[j] * 8.0 / period << " kbps"
                   << endl; // output the ephermal data rate (omit pkt size 1kB)
         }
+
       if (windowFile.is_open ())
         windowFile << endl;
       if (lossRateFile.is_open ())
@@ -629,7 +660,8 @@ main (int argc, char *argv[])
   double minTh = 100;
   double maxTh = 200;
   uint32_t pktSize = 1000; // 1000 KB
-  double stopTime = 10;
+  double stopTime = 8;
+  string pktPrint;
   isPrintHeader = false; // if print tcp header
   isPrintTx = false;
   isPrintLeft = false;
@@ -637,8 +669,8 @@ main (int argc, char *argv[])
 
   string appDataRate = "1Mbps"; // no use here
   string queueType = "DropTail";
-  string bottleNeckLinkBw = "1Mbps";
-  string bottleNeckLinkDelay = "200ms";
+  string bottleNeckLinkBw = "100Mbps";
+  string bottleNeckLinkDelay = "5ms";
   string attackFlowType = "ns3:TcpSocketFactory"; // if we need here?
 
   // just copy the original below
@@ -654,7 +686,11 @@ main (int argc, char *argv[])
 
   // initialize tPkt
   for (int i = 0; i < ARRAY_SIZE; i++)
+  {
     tPkt[i] = 0.0;
+    txCnt[i] = 0;
+    rxCnt[i] = 0;
+  }
 
   //get the local time
   std::time_t t = std::time (NULL);
@@ -666,6 +702,7 @@ main (int argc, char *argv[])
   cmd.AddValue ("enableEarlyDrop", "enableEarlyDrop", enableEarlyDrop);
   cmd.AddValue ("attackerDataRate", "attack data rate", attackerDataRate);
   cmd.AddValue ("clientDataRate", "legitimate users data rate", clientDataRate);
+  cmd.AddValue ("bottleNeckLinkDelay", "bottle neck link delay", bottleNeckLinkDelay);    /// added
   cmd.AddValue ("bottleNeckLinkBw", "bottle neck link bandwidth", bottleNeckLinkBw);
   cmd.AddValue ("stopTime", "Stopping time for simulation", stopTime);
   cmd.AddValue ("attackFlowType", "Type of attacking flows", attackFlowType);
@@ -676,9 +713,16 @@ main (int argc, char *argv[])
   cmd.AddValue ("modeBytes", "Set Queue mode to Packets <0> or bytes <1>", modeBytes);
   cmd.AddValue ("nCrossing", "The number of crossing traffic flows", nCrossing);
 
+  cmd.AddValue ("enablePacketPrint", "enable printing packet detail in log", pktPrint);
+
   cmd.AddValue ("redMinTh", "RED queue minimum threshold", minTh);
   cmd.AddValue ("redMaxTh", "RED queue maximum threshold", maxTh);
   cmd.Parse (argc, argv);
+
+  cout << "bottlelNeck Link BW: " << bottleNeckLinkBw << endl;
+  cout << "client Data Rate: " << clientDataRate << endl;
+  cout << "bottleNeck Link Delay: " << bottleNeckLinkDelay << endl;
+  isPrintHeader = pktPrint == "y"? true : (pktPrint == "n"? false : isPrintHeader);
 
   /*  1. DropTail: simple active queuing management(AQM) algorithm, drop packets after queue is full (not fair, -> bad global tcp sync)
       2. RED (Random Early Detection): monitor average queue size, mark/drop packet based on probability (control queue size, avoid global sync, ...)
@@ -745,8 +789,16 @@ main (int argc, char *argv[])
           "ns3::RedQueue", /// MinTh < queue size (av) < MaxTh: calculate dropping probability
           "MinTh", DoubleValue (minTh), /// < MinTh: enqueue
           "MaxTh", DoubleValue (maxTh), /// > MaxTh: drop
-          "LinkBandwidth", StringValue (bottleNeckLinkBw), "LinkDelay",
-          StringValue (bottleNeckLinkDelay));
+          "LinkBandwidth", StringValue (bottleNeckLinkBw), 
+          "LinkDelay", StringValue (bottleNeckLinkDelay));
+    }
+    else
+    {
+      bottleNeckLink.SetQueue(
+        "ns3::DropTailQueue",
+        "MaxSize", StringValue("200p")
+      );
+      // cout << "Drop tail queue set!" << endl;
     }
 
   //leaf helper:
@@ -845,7 +897,8 @@ main (int argc, char *argv[])
       congWin[j] = 0;
       receiveWin[j] = 0;
       lossRateArray[j] = 0;
-      recvData[j] = 0;
+      recvData[j] = 0.0;
+      recvBit[j] = 0.0;
     }
   //=============================Trace source============================//
   router = d1.GetRight ();
@@ -929,19 +982,21 @@ main (int argc, char *argv[])
   if (outputFile.is_open ())
     {
       outputFile << "==============================================================="
-                 << "\nNaturalShare with flat rate: "
-                 << "\nRun simulation at: " << localTime << "\nSimulation duration: "
-                 << stopTime
+                 << "\Mbox test with flat rate: "
+                 << "\nRun simulation at: " << localTime 
+                 << "\nSimulation duration: " << stopTime
                  //<< "\nAttack Flow Type: " << attackFlowType
                  << "\nBottleneck link bandwidth: " << bottleNeckLinkBw
-                 << "\nAttacker data rate: " << attackerDataRate
-                 << "\nLegitimate data rate: " << clientDataRate << "\nEnable early drop "
-                 << enableEarlyDrop << "\nNumber of attackers: " << 0
+                 << "\nBottleneck link delay: " << bottleNeckLinkDelay
+                //  << "\nAttacker data rate: " << attackerDataRate
+                 << "\nLegitimate data rate: " << clientDataRate 
+                 << "\nEnable early drop " << enableEarlyDrop 
+                //  << "\nNumber of attackers: " << 0
                  << "\nNumber of normal users: " << nRight
-                 << "\nNumber of crossing users: " << nCrossing << "\nQueue Type: " << queueType
-                 << "\nAttack period: " << period << ", attack duration: " << duration
-                 << "\nLoss rate threshold: "
-                 << lossRateThreshold
+                 << "\nNumber of crossing users: " << nCrossing 
+                 << "\nQueue Type: " << queueType
+                 << "\nPeriod: " << period << ", attack duration: " << duration
+                 << "\nLoss rate threshold: "<< lossRateThreshold
                  //<< "\nAttack Rate: " << attackerDataRate
                  //<< "\nSimulation Time: "
                  //<< Simulator::Now ().GetSeconds ()

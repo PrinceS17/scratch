@@ -98,10 +98,14 @@ double total_capacity = 0;
 // for RTT record
 // vector< vector<double> > rtt;
 double **rtt;
-int tagScale = (int) 1e3;
+int tagScale = (int) 1e8;
 map<int, map<int, bool>> tagMap;
 vector<string> fileName;
 double tPkt[ARRAY_SIZE];
+bool isPrintHeader;
+bool isPrintTx;
+bool isPrintLeft;
+bool isPrintRx;
 
 // log component definition
 NS_LOG_COMPONENT_DEFINE ("TestForMiddlePolice");
@@ -361,7 +365,7 @@ MyApp::SendPacket (void)
   stringstream ss;
   ss << "TX: " << Simulator::Now ().GetSeconds () << " s: " << m_tagValue << ". " << m_cnt - 1
      << " ; total: " << ++txCnt;
-  NS_LOG_INFO (ss.str ());
+  if(isPrintTx) NS_LOG_INFO (ss.str ());
 
   Ptr<Packet> packet = Create<Packet> (m_packetSize);
   packet->AddPacketTag (tag); //add tags
@@ -470,9 +474,9 @@ PktArrival (Ptr<const Packet> p)
       ss << "- RX: " << Simulator::Now ().GetSeconds () << " : " << index << ". " << cnt
          << " : rt pkt time = " << ttemp - tPkt[index] << " s ; total(tag): " << ++rxTagCnt
          << " ; total: " << rxCnt;
-      NS_LOG_INFO (ss.str () + "; " + logPktIpv4Address(p));
+      if(isPrintRx) NS_LOG_INFO (ss.str () + "; " + logPktIpv4Address(p));
       // NS_LOG_INFO ("- TCP Header: " + logTcpHeader(p));
-      NS_LOG_INFO (printPkt(p));
+      if(isPrintHeader) NS_LOG_INFO (printPkt(p));
       
 
       tPkt[index] = ttemp;
@@ -578,7 +582,7 @@ PktArrivalLeft (Ptr<const Packet> p)
       stringstream ss;
       ss << "   Left router: " << Simulator::Now ().GetSeconds () << ": " << index << ". " << cnt
          << " ; total(tag): " << ++pktTagLeft << " ; total: " << pktLeft;
-      NS_LOG_INFO (ss.str () + "; " + logPktIpv4Address(p));
+      if(isPrintLeft) NS_LOG_INFO (ss.str () + "; " + logPktIpv4Address(p));
       // NS_LOG_INFO ("- TCP Header: " + logTcpHeader(p));
     }
 }
@@ -625,6 +629,10 @@ main (int argc, char *argv[])
   double maxTh = 200;
   uint32_t pktSize = 1000; // 1000 KB
   double stopTime = 10;
+  isPrintHeader = false; // if print tcp header
+  isPrintTx = false;
+  isPrintLeft = false;
+  isPrintRx = true;
 
   string appDataRate = "1Mbps"; // no use here
   string queueType = "DropTail";
@@ -745,6 +753,13 @@ main (int argc, char *argv[])
           "MaxTh", DoubleValue (maxTh), /// > MaxTh: drop
           "LinkBandwidth", StringValue (bottleNeckLinkBw), "LinkDelay",
           StringValue (bottleNeckLinkDelay));
+    }
+    else
+    {
+      bottleNeckLink.SetQueue(
+        "ns3::DropTail",
+        "MaxSize", StringValue("100p")
+      );
     }
 
   //leaf helper:
