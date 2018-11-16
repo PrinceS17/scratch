@@ -26,6 +26,8 @@
 #include "ns3/ipv4-flow-classifier.h"
 #include "ns3/point-to-point-net-device.h"
 
+#include "ns3/tools.h"
+
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -46,8 +48,8 @@ using namespace ns3;
 
 #define ARRAY_SIZE 1000
 
-std::string attackerDataRate = "30Mbps";
-std::string clientDataRate = "0.1Mbps";
+std::string attackerDataRate = "4Mbps";        // currently no use, but keep for compatibility
+std::string clientDataRate = "1Mbps";
 double period = 0.5; // will it influence the cwnd / rwnd value?
 double duration = period / 1;
 uint16_t port = 5001;
@@ -63,8 +65,9 @@ Ptr<PointToPointNetDevice> p2pDevice;
 // uint32_t nLeaf = 4;
 // uint32_t nAttacker = 4;
 // int size = nLeaf + nAttacker;
-uint32_t nLeft = 2; // # receiver
-uint32_t nRight = 2; // # senders
+uint32_t nLeft = 4; // # receiver
+uint32_t nRight = 4; // # senders
+uint32_t nAttacker = 2;
 
 double detectPeriod = 0.0;
 uint32_t lock = 0;
@@ -107,6 +110,7 @@ bool isPrintTx;
 bool isPrintLeft;
 bool isPrintRx;
 bool firstRtt = true;
+string fairness;
 
 // log component definition
 NS_LOG_COMPONENT_DEFINE ("TestForMiddlePolice");
@@ -117,98 +121,98 @@ std::ofstream lossRateFile ("natural_flat_LR.data", std::ios::out);
 
 // tool function
 
-vector<int> getPktSizes(Ptr <const Packet> p)     // get [p2p size, ip size, tcp size, data size]
-{
-  Ptr<Packet> pktCopy = p->Copy();
-  vector<int> res;
-  PppHeader pppH;
-  Ipv4Header ipH;
-  TcpHeader tcpH;
+// vector<int> getPktSizes(Ptr <const Packet> p)     // get [p2p size, ip size, tcp size, data size]
+// {
+//   Ptr<Packet> pktCopy = p->Copy();
+//   vector<int> res;
+//   PppHeader pppH;
+//   Ipv4Header ipH;
+//   TcpHeader tcpH;
 
-  res.push_back((int)pktCopy->GetSize());
-  pktCopy->RemoveHeader(pppH);
-  res.push_back((int)pktCopy->GetSize());
-  pktCopy->RemoveHeader(ipH);
-  res.push_back((int)pktCopy->GetSize());
-  pktCopy->RemoveHeader(tcpH);
-  res.push_back((int)pktCopy->GetSize());
-  return res;
-}
+//   res.push_back((int)pktCopy->GetSize());
+//   pktCopy->RemoveHeader(pppH);
+//   res.push_back((int)pktCopy->GetSize());
+//   pktCopy->RemoveHeader(ipH);
+//   res.push_back((int)pktCopy->GetSize());
+//   pktCopy->RemoveHeader(tcpH);
+//   res.push_back((int)pktCopy->GetSize());
+//   return res;
+// }
 
-uint32_t getTcpSize(Ptr <const Packet> p)
-{
-  Ptr<Packet> pktCopy = p->Copy();
-  PppHeader pppH;
-  Ipv4Header ipH;
-  TcpHeader tcpH;
-  pktCopy->RemoveHeader(pppH);
-  pktCopy->RemoveHeader(ipH);
-  pktCopy->RemoveHeader(tcpH);
-  return pktCopy->GetSize();
-}
+// uint32_t getTcpSize(Ptr <const Packet> p)
+// {
+//   Ptr<Packet> pktCopy = p->Copy();
+//   PppHeader pppH;
+//   Ipv4Header ipH;
+//   TcpHeader tcpH;
+//   pktCopy->RemoveHeader(pppH);
+//   pktCopy->RemoveHeader(ipH);
+//   pktCopy->RemoveHeader(tcpH);
+//   return pktCopy->GetSize();
+// }
 
-string 
-printPkt(Ptr <const Packet> p)
-{
-  Ptr<Packet> pktCopy = p->Copy();
-  stringstream ss;
-  pktCopy->Print(ss);
-  return ss.str();
-}
+// string 
+// printPkt(Ptr <const Packet> p)
+// {
+//   Ptr<Packet> pktCopy = p->Copy();
+//   stringstream ss;
+//   pktCopy->Print(ss);
+//   return ss.str();
+// }
 
-string
-logIpv4Header (Ptr<const Packet> p)
-{
-  Ptr<Packet> pktCopy = p->Copy ();
-  PppHeader pppH;
-  Ipv4Header ipH;
-  pktCopy->RemoveHeader (pppH);
-  pktCopy->PeekHeader (ipH); /// need to know the exact structure of header
-  stringstream ss;
-  ipH.Print (ss);
-  return ss.str ();
-}
+// string
+// logIpv4Header (Ptr<const Packet> p)
+// {
+//   Ptr<Packet> pktCopy = p->Copy ();
+//   PppHeader pppH;
+//   Ipv4Header ipH;
+//   pktCopy->RemoveHeader (pppH);
+//   pktCopy->PeekHeader (ipH); /// need to know the exact structure of header
+//   stringstream ss;
+//   ipH.Print (ss);
+//   return ss.str ();
+// }
 
-string
-logPppHeader (Ptr<const Packet> p)
-{
-  Ptr<Packet> pktCopy = p->Copy ();
-  PppHeader pppH;
-  pktCopy->PeekHeader (pppH);
-  stringstream ss;
-  pppH.Print (ss);
-  return ss.str ();
-}
+// string
+// logPppHeader (Ptr<const Packet> p)
+// {
+//   Ptr<Packet> pktCopy = p->Copy ();
+//   PppHeader pppH;
+//   pktCopy->PeekHeader (pppH);
+//   stringstream ss;
+//   pppH.Print (ss);
+//   return ss.str ();
+// }
 
-string
-logTcpHeader (Ptr<const Packet> p)
-{
-  Ptr<Packet> pktCopy = p->Copy ();
-  PppHeader pppH;
-  Ipv4Header ipH;
-  TcpHeader tcpH;
-  pktCopy->RemoveHeader (pppH);
-  pktCopy->RemoveHeader (ipH);
-  pktCopy->PeekHeader (tcpH);
-  stringstream ss;
-  tcpH.Print (ss);
-  return ss.str ();
-}
+// string
+// logTcpHeader (Ptr<const Packet> p)
+// {
+//   Ptr<Packet> pktCopy = p->Copy ();
+//   PppHeader pppH;
+//   Ipv4Header ipH;
+//   TcpHeader tcpH;
+//   pktCopy->RemoveHeader (pppH);
+//   pktCopy->RemoveHeader (ipH);
+//   pktCopy->PeekHeader (tcpH);
+//   stringstream ss;
+//   tcpH.Print (ss);
+//   return ss.str ();
+// }
 
-string
-logPktIpv4Address (Ptr<const Packet> p)
-{
-  Ptr<Packet> pktCopy = p->Copy ();
-  PppHeader pppH;
-  Ipv4Header ipH;
-  pktCopy->RemoveHeader (pppH);
-  pktCopy->PeekHeader (ipH);
-  stringstream ss;
-  ipH.GetSource ().Print (ss);
-  ss << " > ";
-  ipH.GetDestination ().Print (ss);
-  return ss.str ();
-}
+// string
+// logPktIpv4Address (Ptr<const Packet> p)
+// {
+//   Ptr<Packet> pktCopy = p->Copy ();
+//   PppHeader pppH;
+//   Ipv4Header ipH;
+//   pktCopy->RemoveHeader (pppH);
+//   pktCopy->PeekHeader (ipH);
+//   stringstream ss;
+//   ipH.GetSource ().Print (ss);
+//   ss << " > ";
+//   ipH.GetDestination ().Print (ss);
+//   return ss.str ();
+// }
 
 //=========================================================================//
 //=========================Begin of TAG definition=========================//
@@ -411,22 +415,22 @@ MyApp::ScheduleTx (void)
     }
 }
 
-// void attackFlow(PointToPointDumbbellHelper d, uint32_t nAttacker, double stopTime)
-// {
-//   for (uint32_t i = d.RightCount() - nAttacker; i < d.RightCount(); ++i)
-//   {
-//     Ptr<Socket> ns3Socket = Socket::CreateSocket(d.GetRight(i), UdpSocketFactory::GetTypeId());
+void attackFlow(PointToPointDumbbellHelper d, uint32_t nAttacker)
+{
+  for (uint32_t i = d.RightCount() - nAttacker; i < d.RightCount(); ++i)
+  {
+    Ptr<Socket> ns3Socket = Socket::CreateSocket(d.GetRight(i), TcpSocketFactory::GetTypeId());
 
-//     Address sinkAddress(InetSocketAddress(d.GetLeftIpv4Address(i), attackerport));
-//     Ptr<MyApp> app = CreateObject<MyApp>();
-//     uint32_t tagValue = i + 1; //take the least significant 8 bits
-//     app->SetTagValue(tagValue);
-//     app->Setup(ns3Socket, sinkAddress, 1000, DataRate(attackerDataRate));
-//     d.GetRight(i)->AddApplication(app);
-//     app->SetStartTime(Seconds(0.0));
-//     app->SetStopTime(Seconds(duration));
-//   }
-// }
+    Address sinkAddress(InetSocketAddress(d.GetLeftIpv4Address(i), attackerport));
+    Ptr<MyApp> app = CreateObject<MyApp>();
+    uint32_t tagValue = i + 1; //take the least significant 8 bits
+    app->SetTagValue(tagValue);
+    app->Setup(ns3Socket, sinkAddress, 1000, DataRate(attackerDataRate));
+    d.GetRight(i)->AddApplication(app);
+    app->SetStartTime(Seconds(0.0));
+    app->SetStopTime(Seconds(duration));
+  }
+}
 
 void
 clearArray ()
@@ -513,13 +517,19 @@ PktArrival (Ptr<const Packet> p)
             {
               // cout << index << " : rwnd = " << receiveWin[index] << " ; cwnd = " << congWin[index] <<
               //     "; rtLR = " << realtimeLossRate << "; LLR = " << lossRateArray[index] << endl;
-
               if (realtimeLossRate > lossRateThreshold || lossRateArray[index] > lossRateThreshold)
+              // why this condition: if not, no good put, bw -> 0
+
                 {
                   p2pDevice->SetEarlyDrop (true);
                   realtimeDrop--;
-                  cout << "Early drop!" << endl;
                 }
+
+              if(Simulator::Now().GetSeconds() > detectPeriod && receiveWin[index] > 1.2 * congWin[index])
+                p2pDevice->SetEarlyDrop (true);
+              // seems not right...
+
+
             }
         }
     }
@@ -532,6 +542,7 @@ PktArrival (Ptr<const Packet> p)
 
   if (Simulator::Now ().GetSeconds () > detectPeriod)
     {
+
       cout << endl
            << Simulator::Now ().GetSeconds () << "s detection period: " << bootStrap++ << endl;
       if (windowFile.is_open ())
@@ -545,7 +556,21 @@ PktArrival (Ptr<const Packet> p)
           double lossRate = receiveWin[j] > 0 ? (double) dropArray[j] / receiveWin[j] : 0.0;
           lossRateArray[j] = receiveWin[j] > 5 ? (1 - beta) * lossRate + beta * lossRateArray[j]
                                                : beta * lossRateArray[j]; // ??
-          congWin[j] = receiveWin[j] >= dropArray[j] ? receiveWin[j] - dropArray[j] : 0;
+
+
+          total_capacity += receiveWin[j] >= dropArray[j]? receiveWin[j] - dropArray[j] : 0;
+        }
+        cout << "total capacity: " << total_capacity << endl;
+
+        // rate allocation
+        for(uint32_t j = 0; j < nRight; ++ j)
+        {
+            if(fairness == "natural") 
+                congWin[j] = receiveWin[j] >= dropArray[j]? receiveWin[j] - dropArray[j] : 0;
+            else if(fairness == "persender")
+                congWin[j] = total_capacity / nRight;
+            else ;
+
 
           // output to file & stdout
           if (windowFile.is_open ())
@@ -667,8 +692,9 @@ main (int argc, char *argv[])
   isPrintLeft = false;
   isPrintRx = false;
   uint32_t maxWinSize = 131070;
+  fairness = "natural";         // choose from: natural, persender
 
-  string appDataRate = "1Mbps"; // no use here
+  string appDataRate = "20Mbps"; // no use here
   string queueType = "DropTail";
   string bottleNeckLinkBw = "100Mbps";
   string bottleNeckLinkDelay = "5ms";
@@ -715,6 +741,7 @@ main (int argc, char *argv[])
   cmd.AddValue ("nCrossing", "The number of crossing traffic flows", nCrossing);
 
   cmd.AddValue ("enablePacketPrint", "enable printing packet detail in log", pktPrint);
+  cmd.AddValue ("fairness", "Set the fairness policy of the mbox", fairness);
 
   cmd.AddValue ("redMinTh", "RED queue minimum threshold", minTh);
   cmd.AddValue ("redMaxTh", "RED queue maximum threshold", maxTh);
@@ -723,15 +750,17 @@ main (int argc, char *argv[])
 
   cout << "bottlelNeck Link BW: " << bottleNeckLinkBw << endl;
   cout << "client Data Rate: " << clientDataRate << endl;
+  cout << "attacker Data Rate: " << attackerDataRate << endl;
   cout << "bottleNeck Link Delay: " << bottleNeckLinkDelay << endl;
+  cout << "fairness: " << fairness << endl;
   isPrintHeader = pktPrint == "y"? true : (pktPrint == "n"? false : isPrintHeader);
   
-  TcpOptionWinScale winScale;
-  cout << "win scale: " << winScale.GetScale() << "; id: " << winScale.GetTypeId() << endl;
-  cout << winScale.GetSerializedSize() << endl;
+//   TcpOptionWinScale winScale;
+//   cout << "win scale: " << winScale.GetScale() << "; id: " << winScale.GetTypeId() << endl;
+//   cout << winScale.GetSerializedSize() << endl;
   
-  winScale.SetScale(2);
-  cout << "win scale: " << winScale.GetScale() << endl;
+//   winScale.SetScale(2);
+//   cout << "win scale: " << winScale.GetScale() << endl;
 
   // from command line arguments
   // Config::SetDefault("ns3::TcpSocketBase::MaxWindowSize", UintegerValue(131070));     // doesn't work
@@ -850,21 +879,32 @@ main (int argc, char *argv[])
 
   /* what's the difference of packet sink & cross sink ? packet sink is what we care?*/
   // create the package sink application, which means that the endpoint will receive packets using certain protocols
+
   PacketSinkHelper packetSinkHelper ("ns3::TcpSocketFactory", sinkLocalAddress);
+  PacketSinkHelper attackerPacketSinkHelper(attackFlowType, attackerSinkLocalAddress);
 
   // Create the normal TCP flows sink applications
   ApplicationContainer sinkApps;
   //for (uint32_t i = 0; i < d1.LeftCount () - nAttacker; ++i)
-  for (uint32_t i = 0; i < d1.LeftCount (); ++i)
+  for (uint32_t i = 0; i < d1.LeftCount () - nAttacker; ++i)
     {
       // packetSinkHelper.Install (node): install the sink app on this node   /// which is tcp on sink local addr
       // sinkApps.add (app): add one single application to the container
       sinkApps.Add (packetSinkHelper.Install (d1.GetLeft (i)));
     }
 
+  // Create the attack flow sink application
+  ApplicationContainer attackerSinkApps;
+  for (uint32_t j = d1.LeftCount() - nAttacker; j < d1.LeftCount(); ++j)
+  {
+    attackerSinkApps.Add(attackerPacketSinkHelper.Install(d1.GetLeft(j)));
+  }
+
   // Arrange all application in the container to start and stop
   sinkApps.Start (Seconds (0.0));
   sinkApps.Stop (Seconds (stopTime));
+  attackerSinkApps.Start(Seconds(0.0));
+  attackerSinkApps.Stop(Seconds(stopTime));
 
   //==========================================================================//
   //======================End of sink applications============================//
@@ -874,7 +914,7 @@ main (int argc, char *argv[])
   //================Creating the normal client applications===================//
   //==========================================================================//
 
-  for (uint32_t i = 0; i < d1.RightCount (); ++i)
+  for (uint32_t i = 0; i < d1.RightCount () - nAttacker; ++i)
     {
       Ptr<Socket> ns3Socket =
           Socket::CreateSocket (d1.GetRight (i), TcpSocketFactory::GetTypeId ());
@@ -905,6 +945,18 @@ main (int argc, char *argv[])
   flowmon->Stop (Seconds (stopTime));
 
   //==========================================================================//
+  //================Creating the attack client applications===================//
+  //==========================================================================//
+  double start = 0.1;
+  for (; start < stopTime; start += period)
+  {
+    //Simulator::Schedule(Seconds (start), &measureDropRate, flowmon, start);
+    Simulator::Schedule(Seconds(start), &attackFlow, d1, nAttacker);
+  }
+
+
+
+  //==========================================================================//
 
   for (uint32_t j = 0; j < nRight; ++j)
     {
@@ -930,11 +982,11 @@ main (int argc, char *argv[])
           rightRouter->GetDevice (i)->TraceConnectWithoutContext ("MacTx",
                                                                   MakeCallback (&PktArrival));
           rightRouter->GetDevice (i)->TraceConnectWithoutContext ("MacTxDrop",
-                                                                  MakeCallback (&PktDrop));
+                                                                  MakeCallback (&PktDrop));;
           rightRouter->GetDevice (i)->TraceConnectWithoutContext ("PhyRxDrop",
                                                                   MakeCallback (&PktDropOverflow));
         //   Simulator::Schedule (Seconds (0.00001), &TraceRtt, "mptest-rtt.data");
-          p2pDevice = DynamicCast<PointToPointNetDevice> (router->GetDevice (i));
+          p2pDevice = DynamicCast<PointToPointNetDevice> (router->GetDevice (i));       // it's used for setEarlyDrop
         }
       bottleNeckLink.EnablePcap (
           "lrouter", leftRouter->GetDevice (i)); /// PCAP: a binary format for packet capture
@@ -950,10 +1002,10 @@ main (int argc, char *argv[])
 
   //===========================================================================//
 
-  // ascii tracing
-  AsciiTraceHelper ascii;
-  bottleNeckLink.EnableAsciiAll (ascii.CreateFileStream ("mptest_woTag.tr"));
-  bottleNeckLink.EnablePcapAll ("mptest_woTag");
+//   // ascii tracing
+//   AsciiTraceHelper ascii;
+//   bottleNeckLink.EnableAsciiAll (ascii.CreateFileStream ("mptest_woTag.tr"));
+//   bottleNeckLink.EnablePcapAll ("mptest_woTag");
 
   // Routing table
   Ipv4GlobalRoutingHelper::PopulateRoutingTables (); /// exact meaning? necessary or not?
@@ -971,7 +1023,7 @@ main (int argc, char *argv[])
   double totalCounter = 0;
   double totalCounterSquare = 0;
 
-  for (uint32_t i = 0; i < sinkApps.GetN (); i++)
+  for (uint32_t i = 0; i < nRight - nAttacker; i++)
     {
       /// number of packet we care about
       Ptr<Application> app = sinkApps.Get (i);
@@ -987,9 +1039,26 @@ main (int argc, char *argv[])
       totalCounterSquare += (bytes * bytes);
     }
 
+    //Attack flows
+  double attackerCounter = 0;
+  double attackerCounterSquare = 0;
+  for (uint32_t j = 0; j < attackerSinkApps.GetN(); j++)
+  {
+    Ptr<Application> app = attackerSinkApps.Get(j);
+    // PacketSink: receive and consume the traffic generated to the IP address and port
+    Ptr<PacketSink> pktSink = DynamicCast<PacketSink>(app);
+
+    // GetTotalRx: total bytes received in a sink app
+    double bytes = 1.0 * pktSink->GetTotalRx() * 8 / 1000000;
+    attackerCounter += bytes;
+    totalCounter += bytes;
+    totalCounterSquare += (bytes * bytes);
+    attackerCounterSquare += (bytes * bytes);
+  }
+
   double normalAverageRate = clientCounter / Simulator::Now ().GetSeconds () / nRight;
   double client_index = clientCounter * clientCounter / clientCounterSquare / nRight;
-  // double attackerAverageRate = nAttacker == 0 ? 0 : attackerCounter / Simulator::Now().GetSeconds() / nAttacker;
+  double attackerAverageRate = nAttacker == 0 ? 0 : attackerCounter / Simulator::Now().GetSeconds() / nAttacker;
   double total_index =
       totalCounter * totalCounter / totalCounterSquare / nRight; /// what's the meaning?
 
@@ -1008,7 +1077,7 @@ main (int argc, char *argv[])
                  //<< "\nAttack Flow Type: " << attackFlowType
                  << "\nBottleneck link bandwidth: " << bottleNeckLinkBw
                  << "\nBottleneck link delay: " << bottleNeckLinkDelay
-                //  << "\nAttacker data rate: " << attackerDataRate
+                 << "\nAttacker data rate: " << attackerDataRate
                  << "\nLegitimate data rate: " << clientDataRate 
                  << "\nEnable early drop " << enableEarlyDrop 
                 //  << "\nNumber of attackers: " << 0
