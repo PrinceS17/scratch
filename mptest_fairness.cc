@@ -52,6 +52,7 @@ std::string attackerDataRate = "4Mbps";        // currently no use, but keep for
 std::string clientDataRate = "1Mbps";
 double period = 0.5; // will it influence the cwnd / rwnd value?
 double duration = period / 1;
+double moment = 0;    
 uint16_t port = 5001;
 uint16_t attackerport = 5003;
 uint16_t mmtu = 1599;
@@ -109,7 +110,9 @@ bool isPrintHeader;
 bool isPrintTx;
 bool isPrintLeft;
 bool isPrintRx;
+bool isChangeFair;
 bool firstRtt = true;
+bool isTcp;
 string fairness;
 
 // log component definition
@@ -419,7 +422,8 @@ void attackFlow(PointToPointDumbbellHelper d, uint32_t nAttacker)
 {
   for (uint32_t i = d.RightCount() - nAttacker; i < d.RightCount(); ++i)
   {
-    Ptr<Socket> ns3Socket = Socket::CreateSocket(d.GetRight(i), TcpSocketFactory::GetTypeId());
+    Ptr<Socket> ns3Socket = isTcp? Socket::CreateSocket(d.GetRight(i), TcpSocketFactory::GetTypeId())
+                            :Socket::CreateSocket (d.GetRight(i), UdpSocketFactory::GetTypeId ());
 
     Address sinkAddress(InetSocketAddress(d.GetLeftIpv4Address(i), attackerport));
     Ptr<MyApp> app = CreateObject<MyApp>();
@@ -476,7 +480,20 @@ PktArrival (Ptr<const Packet> p)
   Ptr<Packet> pktCopy = p->Copy ();
   MyTag tag;
   // printHeader(p);
-  vector<int> tmp = getPktSizes(p);
+  vector<int> tmp = getPktSizes(p, isTcp? TCP:UDP);
+  // vector<int> tmp{500,500,500,500};
+  // printPkt(pktCopy);
+
+  // functionality: switch the fairness
+  if(isChangeFair) 
+  if(floor(Simulator::Now().GetSeconds()) == 50 || floor(Simulator::Now().GetSeconds() == 100) )
+    {
+      // fairness = fairness == "persender"? "natural":"persender";
+      if(fairness == "natural") fairness = "persender";
+      else fairness = "natural";
+      cout << "Fairness change!" << endl;
+      isChangeFair = false;
+    }
 
   if (pktCopy->PeekPacketTag (tag)) // if find a tag
     {
@@ -491,7 +508,7 @@ PktArrival (Ptr<const Packet> p)
       stringstream ss;
       // if(!index)
       ss << "- RX: " << Simulator::Now ().GetSeconds () << " : " << index + 1  << ". " << rxCnt[index]
-         << " : rt pkt time = " << ttemp - tPkt[index] << " s ; tcp size: " << getTcpSize(p);
+         << " : rt pkt time = " << ttemp - tPkt[index] << " s ;"; // tcp size: " << getTcpSize(p);
       if (isPrintRx)
         NS_LOG_INFO (ss.str () + "; " + logPktIpv4Address (p));
       if (isPrintHeader)
@@ -525,12 +542,15 @@ PktArrival (Ptr<const Packet> p)
                   realtimeDrop--;
                 }
 
-              if(Simulator::Now().GetSeconds() > detectPeriod && receiveWin[index] > 1.2 * congWin[index])
-                p2pDevice->SetEarlyDrop (true);
+              if(fairness == "persender")
+                // threshold 1.2 originally!!
+                if(Simulator::Now().GetSeconds() > moment + 0.1  && receiveWin[index] > 1.2 * congWin[index])
+                  p2pDevice->SetEarlyDrop (true);
+              
+              
               // seems not right...
-
-
             }
+            if(Simulator::Now().GetSeconds() > moment + 0.1) moment += 0.1;
         }
     }
   // else {cout << "  tag not found!" << endl;}     /// no need after counting tagged packet
@@ -691,14 +711,17 @@ main (int argc, char *argv[])
   isPrintTx = false;
   isPrintLeft = false;
   isPrintRx = false;
+  isTcp = true;
+  isChangeFair = true;
   uint32_t maxWinSize = 131070;
-  fairness = "natural";         // choose from: natural, persender
+  fairness = "persender";         // choose from: natural, persender
 
   string appDataRate = "20Mbps"; // no use here
   string queueType = "DropTail";
   string bottleNeckLinkBw = "100Mbps";
   string bottleNeckLinkDelay = "5ms";
-  string attackFlowType = "ns3::TcpSocketFactory"; // if we need here?
+  string attackFlowType = isTcp? "ns3::TcpSocketFactory":"ns3::UdpSocketFactory"; // if we need here?
+  string flowType = isTcp? "ns3::TcpSocketFactory":"ns3::UdpSocketFactory";       // change all to udp
 
   // just copy the original below
   std::string mtu = "1599";
@@ -753,6 +776,8 @@ main (int argc, char *argv[])
   cout << "attacker Data Rate: " << attackerDataRate << endl;
   cout << "bottleNeck Link Delay: " << bottleNeckLinkDelay << endl;
   cout << "fairness: " << fairness << endl;
+  string tmp = isTcp? "TCP":"UDP";
+  cout << "protocol: " << tmp << endl;
   isPrintHeader = pktPrint == "y"? true : (pktPrint == "n"? false : isPrintHeader);
   
 //   TcpOptionWinScale winScale;
@@ -880,7 +905,9 @@ main (int argc, char *argv[])
   /* what's the difference of packet sink & cross sink ? packet sink is what we care?*/
   // create the package sink application, which means that the endpoint will receive packets using certain protocols
 
-  PacketSinkHelper packetSinkHelper ("ns3::TcpSocketFactory", sinkLocalAddress);
+  // PacketSinkHelper packetSinkHelper ("ns3::TcpSocketFactory", sinkLocalAddress);
+  PacketSinkHelper packetSinkHelper (flowType, sinkLocalAddress);
+
   PacketSinkHelper attackerPacketSinkHelper(attackFlowType, attackerSinkLocalAddress);
 
   // Create the normal TCP flows sink applications
@@ -916,8 +943,8 @@ main (int argc, char *argv[])
 
   for (uint32_t i = 0; i < d1.RightCount () - nAttacker; ++i)
     {
-      Ptr<Socket> ns3Socket =
-          Socket::CreateSocket (d1.GetRight (i), TcpSocketFactory::GetTypeId ());
+      Ptr<Socket> ns3Socket = isTcp? Socket::CreateSocket (d1.GetRight (i), TcpSocketFactory::GetTypeId ())
+                              :Socket::CreateSocket(d1.GetRight (i), UdpSocketFactory::GetTypeId());
       Address sinkAddress (
           InetSocketAddress (d1.GetLeftIpv4Address (i % nLeft),
                              port)); /// send to i th left node, map right node to left node
@@ -974,19 +1001,24 @@ main (int argc, char *argv[])
   //std::cout << "number of devices: " << rightRouter->GetNDevices() << std::endl;
   for (uint32_t i = 0; i < rightRouter->GetNDevices (); ++i)
     {
-      // Find the bottleneck device (p2p device)
+      // Find the bottleneck device (p2p device), check the other devices
+      // cout << rightRouter-> GetDevice(i) -> GetTypeId() << " : " << rightRouter->GetDevice(i)->GetMtu() << " =? " << mmtu << endl;
+
       if ((rightRouter->GetDevice (i)->GetMtu ()) == mmtu) // don
         { /// get mtu = mmtu: what's that mean
           bottleNeckLink.EnablePcap (
               "rrouter", rightRouter->GetDevice (i)); /// PCAP: a binary format for packet capture
-          rightRouter->GetDevice (i)->TraceConnectWithoutContext ("MacTx",
-                                                                  MakeCallback (&PktArrival));
-          rightRouter->GetDevice (i)->TraceConnectWithoutContext ("MacTxDrop",
-                                                                  MakeCallback (&PktDrop));;
-          rightRouter->GetDevice (i)->TraceConnectWithoutContext ("PhyRxDrop",
-                                                                  MakeCallback (&PktDropOverflow));
-        //   Simulator::Schedule (Seconds (0.00001), &TraceRtt, "mptest-rtt.data");
           p2pDevice = DynamicCast<PointToPointNetDevice> (router->GetDevice (i));       // it's used for setEarlyDrop
+          p2pDevice ->GetQueue()->TraceConnectWithoutContext("Drop", MakeCallback(&PktDrop));
+          p2pDevice ->GetQueue()->TraceConnectWithoutContext("DropBeforeEnqueue", MakeCallback(&PktDrop));
+          p2pDevice ->GetQueue()->TraceConnectWithoutContext("DropAfterEnqueue", MakeCallback(&PktDrop));
+          // test above
+
+          rightRouter->GetDevice (i)->TraceConnectWithoutContext ("MacTx", MakeCallback (&PktArrival));
+          // rightRouter->GetDevice (i)->TraceConnectWithoutContext ("MacTxDrop", MakeCallback (&PktDrop));;
+          rightRouter->GetDevice (i)->TraceConnectWithoutContext ("PhyRxDrop", MakeCallback (&PktDropOverflow));
+        //   Simulator::Schedule (Seconds (0.00001), &TraceRtt, "mptest-rtt.data");
+          
         }
       bottleNeckLink.EnablePcap (
           "lrouter", leftRouter->GetDevice (i)); /// PCAP: a binary format for packet capture
