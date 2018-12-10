@@ -1,3 +1,19 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
+/*
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation;
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ */
+
 /*
  * NaturalShare policy, test Mbox with 2 senders & 1 receiver
  * MP policy realized in pktArrival of right router
@@ -24,6 +40,7 @@
 #include "ns3/udp-socket-factory.h"
 #include "ns3/tcp-socket-factory.h"
 #include "ns3/ipv4-flow-classifier.h"
+#include "ns3/traffic-control-module.h"
 #include "ns3/point-to-point-net-device.h"
 
 #include "ns3/tools.h"
@@ -101,6 +118,7 @@ double total_capacity = 0;
 // for RTT record
 // vector< vector<double> > rtt;
 vector<string> fileName;
+string qFileName;
 double tPkt[ARRAY_SIZE];
 int txCnt[ARRAY_SIZE];
 int rxCnt[ARRAY_SIZE];
@@ -397,14 +415,13 @@ MyApp::SendPacket (void)
   ScheduleTx ();
 
   txCnt[m_tagValue - 1] ++;
-  if(txCnt[m_tagValue - 1] % 500 == 0)
-  {
+  // if(txCnt[m_tagValue - 1] % 500 == 0)
     stringstream ss;
     ss << "TX: " << Simulator::Now ().GetSeconds () << " s: " << m_tagValue // << ". " << m_cnt - 1
       << " ; total: " << txCnt[m_tagValue - 1];
     if (isPrintTx)
       NS_LOG_INFO (ss.str ());
-  }
+      //}
 }
 
 void
@@ -432,7 +449,8 @@ void attackFlow(PointToPointDumbbellHelper d, uint32_t nAttacker)
     app->Setup(ns3Socket, sinkAddress, 1000, DataRate(attackerDataRate));
     d.GetRight(i)->AddApplication(app);
     app->SetStartTime(Seconds(0.0));
-    app->SetStopTime(Seconds(duration));
+    // app->SetStopTime(Seconds(duration));
+
   }
 }
 
@@ -477,6 +495,7 @@ int rxTagCnt = 0;
 static void
 PktArrival (Ptr<const Packet> p)
 {
+
   Ptr<Packet> pktCopy = p->Copy ();
   MyTag tag;
   // printHeader(p);
@@ -508,7 +527,7 @@ PktArrival (Ptr<const Packet> p)
       stringstream ss;
       // if(!index)
       ss << "- RX: " << Simulator::Now ().GetSeconds () << " : " << index + 1  << ". " << rxCnt[index]
-         << " : rt pkt time = " << ttemp - tPkt[index] << " s ;"; // tcp size: " << getTcpSize(p);
+         << " : rt pkt time = " << ttemp - tPkt[index] << " s "; // tcp size: " << getTcpSize(p);
       if (isPrintRx)
         NS_LOG_INFO (ss.str () + "; " + logPktIpv4Address (p));
       if (isPrintHeader)
@@ -517,17 +536,16 @@ PktArrival (Ptr<const Packet> p)
 
       
       tPkt[index] = ttemp;
-      recvData[index] += (double) tmp[3] / 1000.0;   // size in KB
-      recvBit[index] += (double) tmp[0] / 1000.0;    // raw size in KB
       
       if (++realtimePeriod ==
           realtimePacketFeedback) // calculating a real-time loss rate every 50 packets
         {
-          realtimeLossRate = (double) realtimeDrop / realtimePeriod;
+          realtimeLossRate = (double) realtimeDrop / (double)realtimePeriod;
           realtimePeriod = 0;
           realtimeDrop = 0;
         }
 
+      bool tmpDrop = false;
       if (enableEarlyDrop > 0)
         {
           if (receiveWin[index] > congWin[index])
@@ -538,22 +556,19 @@ PktArrival (Ptr<const Packet> p)
               // why this condition: if not, no good put, bw -> 0
 
                 {
-                  p2pDevice->SetEarlyDrop (true);
-                  realtimeDrop--;
+                  tmpDrop = true;
+                  // realtimeDrop--;   // shouldn't -- after I cancel the MacTxDrop
                 }
 
-              if(fairness == "persender")
-                // threshold 1.2 originally!!
-                if(Simulator::Now().GetSeconds() > moment + 0.1  && receiveWin[index] > 1.2 * congWin[index])
-                  p2pDevice->SetEarlyDrop (true);
-              
-              
-              // seems not right...
             }
-            if(Simulator::Now().GetSeconds() > moment + 0.1) moment += 0.1;
+        }
+        if(tmpDrop) p2pDevice->SetEarlyDrop (true);
+        else
+        { 
+          recvData[index] += (double) tmp[3] / 1000.0;   // size in KB
+          recvBit[index] += (double) tmp[0] / 1000.0;    // raw size in KB
         }
     }
-  // else {cout << "  tag not found!" << endl;}     /// no need after counting tagged packet
 
   // filename[n] // should defined globally
   ofstream fout[nRight];
@@ -575,7 +590,7 @@ PktArrival (Ptr<const Packet> p)
           // loss rate & cwnd update
           double lossRate = receiveWin[j] > 0 ? (double) dropArray[j] / receiveWin[j] : 0.0;
           lossRateArray[j] = receiveWin[j] > 5 ? (1 - beta) * lossRate + beta * lossRateArray[j]
-                                               : beta * lossRateArray[j]; // ??
+                                               : beta * lossRateArray[j]; // similar to a time average
 
 
           total_capacity += receiveWin[j] >= dropArray[j]? receiveWin[j] - dropArray[j] : 0;
@@ -654,7 +669,7 @@ static void
 PktDropLeft (Ptr<const Packet> p)
 {
   stringstream ss;
-  ss << "    - Left: drop packet!" << endl;
+  ss << "    - Left: drop packet!";
   NS_LOG_INFO (ss.str ());
 }
 
@@ -665,7 +680,8 @@ PktDrop (Ptr<const Packet> p)
   MyTag tag;
   if (p->PeekPacketTag (tag))
     dropArray[tag.GetSimpleValue () - 1] += 1;
-  cout << "Drop packet!" << endl;
+  // if(dropArray[tag.GetSimpleValue() - 1] % 20 == 0)
+    // cout << Simulator::Now().GetSeconds() << " Drop packet!" << endl;
 }
 
 static void
@@ -682,6 +698,65 @@ PktDropOverflow (Ptr<const Packet> p)
   cout << "Dropping for overflow" << endl;
 }
 
+uint32_t cnt2[ARRAY_SIZE] = {0};
+
+static void
+QueueChange (uint32_t vOld, uint32_t vNew)
+{
+  stringstream ss;
+  ss << "  " << Simulator::Now().GetSeconds() << "s: Queue #packet changed to " << vNew;
+  // NS_LOG_INFO (ss.str());
+
+  fstream fout;
+  fout.open(qFileName, ios::out | ios::app);
+  fout << Simulator::Now().GetSeconds() << " " << vNew << endl;     // keep trace for draw the queue size
+  fout.close();
+}
+
+static void
+PktEnqueue (Ptr<const Packet> p)
+{
+  stringstream ss;
+  
+  NS_LOG_INFO (ss.str());
+  Ptr<Packet> pcp = p->Copy();
+  MyTag tag;
+  if(pcp->PeekPacketTag(tag))
+  {
+    int idx = tag.GetSimpleValue() - 1;
+    stringstream ss;
+    // ss << " " << Simulator::Now().GetSeconds() << "s: Tc Queue drop! " << idx + 1<< ". " << ++ cnt2[idx - 1];
+    ss << "  " << Simulator::Now().GetSeconds() << "s: packet enqueued! node " << idx + 1;
+    NS_LOG_INFO(ss.str());
+  }   
+}
+
+static void
+PktDequeue (Ptr<const Packet> p)
+{
+  stringstream ss;
+  ss << " " << Simulator::Now().GetSeconds() << "s: packet dequeued!";
+  NS_LOG_INFO (ss.str());
+}
+
+static void
+QueueDrop (Ptr<const QueueDiscItem> qi)
+{
+  realtimeDrop += 1;
+  Ptr<Packet> p = qi->GetPacket();
+  MyTag tag;
+  if(p->PeekPacketTag(tag))
+  {
+    int idx = tag.GetSimpleValue() - 1;
+    dropArray[idx] += 1;
+    stringstream ss;
+    ss << " " << Simulator::Now().GetSeconds() << "s: Tc Queue drop! " << idx + 1<< ". " << ++ cnt2[idx - 1];
+    // if(cnt2[idx - 1] % 20 == 0) 
+    // NS_LOG_INFO(ss.str());
+    cout << ss.str() << endl;
+  }   
+}
+
 static void
 RttTracer (Time oldval, Time newval)
 {
@@ -696,6 +771,56 @@ RttTracer (Time oldval, Time newval)
 }
 
 
+// following is my test tracing function
+int cntn[4][4] = {0};
+MyTag tag;
+uint32_t idx;
+
+static void
+PktMacRx (Ptr<const Packet> p)
+{
+  Ptr<Packet> pktCopy = p->Copy();
+  if(pktCopy->PeekPacketTag(tag)) idx = tag.GetSimpleValue() - 1;
+  if(idx == 0)
+    cout << "  " << Simulator::Now().GetSeconds() << "s " << idx + 1 << " : " << cntn[idx][0] ++ <<" : Mac Rx, packet passed up from Phy" << endl;
+}
+
+static void
+PktPhyTxBegin (Ptr<const Packet> p)
+{
+  Ptr<Packet> pktCopy = p->Copy();
+  if(pktCopy->PeekPacketTag(tag)) idx = tag.GetSimpleValue() - 1;
+  if(idx == 0)
+    cout << idx + 1 << " : " << cntn[idx][1] ++ <<" : Phy Tx Begin" << endl;
+}
+
+static void
+PktPhyTxEnd (Ptr<const Packet> p)
+{
+  Ptr<Packet> pktCopy = p->Copy();
+  if(pktCopy->PeekPacketTag(tag)) idx = tag.GetSimpleValue() - 1;
+  if(idx == 0)
+    cout << "  " << idx + 1 << " : " << cntn[idx][2] ++ <<" : Phy Tx End" << endl;
+}
+
+static void
+PktPhyRxEnd (Ptr<const Packet> p)
+{
+  Ptr<Packet> pktCopy = p->Copy();
+  if(pktCopy->PeekPacketTag(tag)) idx = tag.GetSimpleValue() - 1;
+  if(idx == 0)
+    cout << "    " << idx + 1 << " : " << cntn[idx][3] ++ <<" : Phy Rx End" << endl;
+}
+
+static void
+PktTxDrop (Ptr<const Packet> p)
+{
+  Ptr<Packet> pktCopy = p->Copy();
+  if(pktCopy->PeekPacketTag(tag)) idx = tag.GetSimpleValue() - 1;
+  if(idx == 0)
+    cout << "==" << idx + 1 << " : " << cntn[idx][3] ++ <<" : Phy Tx Drop!!!" << endl;
+}
+
 //===========================Main Function=============================//
 int
 main (int argc, char *argv[])
@@ -707,22 +832,22 @@ main (int argc, char *argv[])
   uint32_t pktSize = 1000; // 1000 KB
   double stopTime = 3;
   string pktPrint;
+  string prot;
   isPrintHeader = false; // if print tcp header
   isPrintTx = false;
   isPrintLeft = false;
   isPrintRx = false;
   isTcp = true;
-  isChangeFair = true;
+  isChangeFair = false;
   uint32_t maxWinSize = 131070;
   fairness = "persender";         // choose from: natural, persender
 
   string appDataRate = "20Mbps"; // no use here
-  string queueType = "DropTail";
+  string queueType = "RED";
   string bottleNeckLinkBw = "100Mbps";
   string bottleNeckLinkDelay = "5ms";
-  string attackFlowType = isTcp? "ns3::TcpSocketFactory":"ns3::UdpSocketFactory"; // if we need here?
-  string flowType = isTcp? "ns3::TcpSocketFactory":"ns3::UdpSocketFactory";       // change all to udp
-
+  string attackFlowType;
+  
   // just copy the original below
   std::string mtu = "1599";
 
@@ -733,6 +858,8 @@ main (int argc, char *argv[])
       fileName.push_back ("wndOutput_" + to_string (i) + ".dat");
       remove (fileName[i].c_str ());
     }
+  qFileName = "queue.dat";
+  remove(qFileName.c_str());
 
   // initialize tPkt
   for (int i = 0; i < ARRAY_SIZE; i++)
@@ -765,6 +892,7 @@ main (int argc, char *argv[])
 
   cmd.AddValue ("enablePacketPrint", "enable printing packet detail in log", pktPrint);
   cmd.AddValue ("fairness", "Set the fairness policy of the mbox", fairness);
+  cmd.AddValue ("protocol", "The protocol of TCP / UDP", prot);
 
   cmd.AddValue ("redMinTh", "RED queue minimum threshold", minTh);
   cmd.AddValue ("redMaxTh", "RED queue maximum threshold", maxTh);
@@ -776,10 +904,15 @@ main (int argc, char *argv[])
   cout << "attacker Data Rate: " << attackerDataRate << endl;
   cout << "bottleNeck Link Delay: " << bottleNeckLinkDelay << endl;
   cout << "fairness: " << fairness << endl;
-  string tmp = isTcp? "TCP":"UDP";
-  cout << "protocol: " << tmp << endl;
-  isPrintHeader = pktPrint == "y"? true : (pktPrint == "n"? false : isPrintHeader);
   
+  isPrintHeader = pktPrint == "y"? true : (pktPrint == "n"? false : isPrintHeader);
+  isTcp = prot == "TCP"? true: (prot == "UDP"? false : isTcp);
+  cout << "protocol: " << prot << endl;
+  attackFlowType = isTcp? "ns3::TcpSocketFactory":"ns3::UdpSocketFactory"; // if we need here?
+  string flowType = isTcp? "ns3::TcpSocketFactory":"ns3::UdpSocketFactory";       // change all to udp
+
+
+
 //   TcpOptionWinScale winScale;
 //   cout << "win scale: " << winScale.GetScale() << "; id: " << winScale.GetTypeId() << endl;
 //   cout << winScale.GetSerializedSize() << endl;
@@ -790,9 +923,6 @@ main (int argc, char *argv[])
   // from command line arguments
   // Config::SetDefault("ns3::TcpSocketBase::MaxWindowSize", UintegerValue(131070));     // doesn't work
   // Config::SetDefault("ns3::TcpSocket::RcvBufSize", UintegerValue (maxWinSize)); 
-
-
-
 
   /*  1. DropTail: simple active queuing management(AQM) algorithm, drop packets after queue is full (not fair, -> bad global tcp sync)
       2. RED (Random Early Detection): monitor average queue size, mark/drop packet based on probability (control queue size, avoid global sync, ...)
@@ -828,8 +958,8 @@ main (int argc, char *argv[])
   //   maxTh *= pktSize;
   // }
 
-  minTh *= pktSize;
-  maxTh *= pktSize;
+  // minTh *= pktSize;
+  // maxTh *= pktSize;
 
   /// set log components
   LogComponentEnable ("TestForMiddlePolice", LOG_LEVEL_INFO); /// test here
@@ -847,29 +977,12 @@ main (int argc, char *argv[])
   // 3. The connection between two routers
   PointToPointHelper bottleNeckLink;
   bottleNeckLink.SetDeviceAttribute ("DataRate", StringValue (bottleNeckLinkBw));
-  bottleNeckLink.SetDeviceAttribute (
-      "Mtu",
-      StringValue (
-          mtu)); /// maximum transmission unit, largest packet or frame size, that can be sent in a packet- or frame-based network
+  bottleNeckLink.SetDeviceAttribute ("Mtu", StringValue (mtu)); /// maximum transmission unit, largest packet or frame size, that can be sent in a packet- or frame-based network
   bottleNeckLink.SetChannelAttribute ("Delay", StringValue (bottleNeckLinkDelay));
 
-  if (queueType == "RED")
-    {
-      bottleNeckLink.SetQueue (
-          "ns3::RedQueue", /// MinTh < queue size (av) < MaxTh: calculate dropping probability
-          "MinTh", DoubleValue (minTh), /// < MinTh: enqueue
-          "MaxTh", DoubleValue (maxTh), /// > MaxTh: drop
-          "LinkBandwidth", StringValue (bottleNeckLinkBw), 
-          "LinkDelay", StringValue (bottleNeckLinkDelay));
-    }
-    else
-    {
-      bottleNeckLink.SetQueue(
-        "ns3::DropTailQueue",
-        "MaxSize", StringValue("200p")
-      );
-      // cout << "Drop tail queue set!" << endl;
-    }
+  bottleNeckLink.SetQueue(
+    "ns3::DropTailQueue",
+    "MaxSize", StringValue("100p"));       // normal 200p, 20p only for test
 
   //leaf helper:
   PointToPointHelper pointToPointLeaf;
@@ -884,6 +997,22 @@ main (int argc, char *argv[])
   // Install Stack to the whole nodes
   InternetStackHelper stack;
   d1.InstallStack (stack);
+
+  // RED queue disc
+  QueueDiscContainer qdRight;
+  QueueDiscContainer qdLeft;
+  if (queueType == "RED")
+  {
+    TrafficControlHelper tch;
+    tch.SetRootQueueDisc("ns3::RedQueueDisc",
+                        "MinTh", DoubleValue(minTh),
+                        "MaxTh", DoubleValue(maxTh),
+                        "LinkBandwidth", StringValue(bottleNeckLinkBw),
+                        "LinkDelay", StringValue(bottleNeckLinkDelay));
+    // tch.SetRootQueueDisc("ns3::RedQueueDisc");
+    qdRight = tch.Install(d1.GetRight()->GetDevice(0));
+    qdLeft = tch.Install(d1.GetLeft()->GetDevice(0));
+  }
 
   // Assign IP Addresses
   // Three sets of address: the left, the right and the router
@@ -999,36 +1128,67 @@ main (int argc, char *argv[])
   Ptr<Node> rightRouter = d1.GetRight ();
   Ptr<Node> leftRouter = d1.GetLeft ();
   //std::cout << "number of devices: " << rightRouter->GetNDevices() << std::endl;
-  for (uint32_t i = 0; i < rightRouter->GetNDevices (); ++i)
-    {
+  cout << "trace (right): " << endl;
+
+
+  /* 
+  why do this stupid scan and use mtu to find router? we can directly visit it!
+    - the index of router among net devices will change from 0?
+     
+  Ptr<NetDevice> rightLeaf = d1.GetRight()->GetDevice(i);
+  Ptr<NetDevice> rightRouter = d1.GetRight()->GetDevice(0);
+  */
+
+  // for (uint32_t i = 0; i < rightRouter->GetNDevices (); ++i)
+  //   {
       // Find the bottleneck device (p2p device), check the other devices
       // cout << rightRouter-> GetDevice(i) -> GetTypeId() << " : " << rightRouter->GetDevice(i)->GetMtu() << " =? " << mmtu << endl;
 
-      if ((rightRouter->GetDevice (i)->GetMtu ()) == mmtu) // don
-        { /// get mtu = mmtu: what's that mean
-          bottleNeckLink.EnablePcap (
-              "rrouter", rightRouter->GetDevice (i)); /// PCAP: a binary format for packet capture
-          p2pDevice = DynamicCast<PointToPointNetDevice> (router->GetDevice (i));       // it's used for setEarlyDrop
-          p2pDevice ->GetQueue()->TraceConnectWithoutContext("Drop", MakeCallback(&PktDrop));
-          p2pDevice ->GetQueue()->TraceConnectWithoutContext("DropBeforeEnqueue", MakeCallback(&PktDrop));
-          p2pDevice ->GetQueue()->TraceConnectWithoutContext("DropAfterEnqueue", MakeCallback(&PktDrop));
-          // test above
+      /*
+      ********************** i = 0: important!!!  **************************
+      */
+      uint32_t i = 0;       
 
-          rightRouter->GetDevice (i)->TraceConnectWithoutContext ("MacTx", MakeCallback (&PktArrival));
-          // rightRouter->GetDevice (i)->TraceConnectWithoutContext ("MacTxDrop", MakeCallback (&PktDrop));;
-          rightRouter->GetDevice (i)->TraceConnectWithoutContext ("PhyRxDrop", MakeCallback (&PktDropOverflow));
-        //   Simulator::Schedule (Seconds (0.00001), &TraceRtt, "mptest-rtt.data");
+      // if ((rightRouter->GetDevice (i)->GetMtu ()) == mmtu) // don
+      if(true)
+        { /// get mtu = mmtu: what's that mean
+          // bottleNeckLink.EnablePcap ("rrouter", rightRouter->GetDevice (i)); /// PCAP: a binary format for packet capture
+          p2pDevice = DynamicCast<PointToPointNetDevice> (router->GetDevice (i));       // it's used for setEarlyDrop
+          // rightRouter->GetDevice (i)->TraceConnectWithoutContext ("MacTx", MakeCallback (&PktArrival));
           
+          // // MacRx for testing
+          // rightRouter->GetDevice (i)->TraceConnectWithoutContext ("MacRx", MakeCallback (&PktMacRx));
+
+          // rightRouter->GetDevice (i)->TraceConnectWithoutContext ("MacTxDrop", MakeCallback (&PktDrop));;
+          // rightRouter->GetDevice (i)->TraceConnectWithoutContext ("PhyRxDrop", MakeCallback (&PktDropOverflow));
+          // // following: only for test
+          // rightRouter->GetDevice (i)->TraceConnectWithoutContext ("PhyTxDrop", MakeCallback (&PktTxDrop));
+          
+
+          d1.GetRight()->GetDevice(i)->TraceConnectWithoutContext ("MacTxDrop", MakeCallback (&PktDrop));    // it's mbox 's control, con't count in LLR
+          d1.GetRight()->GetDevice(i)->TraceConnectWithoutContext ("PhyRxDrop", MakeCallback (&PktDrop));
+          d1.GetRight()->GetDevice(i)->TraceConnectWithoutContext ("MacTx", MakeCallback (&PktArrival));
+          // d1.GetRight()->GetDevice(i)->TraceConnectWithoutContext ("MacRx", MakeCallback (&PktMacRx));
+
+          Ptr<Queue<Packet> > qDev = p2pDevice->GetQueue();
+          // qDev->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&QueueChange));
+          // qDev->TraceConnectWithoutContext("Enqueue", MakeCallback(&PktEnqueue));
+          // qDev->TraceConnectWithoutContext("Dequeue", MakeCallback(&PktDequeue));
+          qDev->TraceConnectWithoutContext("Drop", MakeCallback(&PktDrop));     // it's in dev queue, counting in LLR
+          // qdev, mactxdrop, phyrxdrop don't drop pkt here
+
+
+          if(queueType == "RED")
+          {
+            Ptr<QueueDisc> qd = qdRight.Get(0);
+            qd->TraceConnectWithoutContext("Drop", MakeCallback(&QueueDrop));   // it's in RED queue, counting in LLR
+            qd->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&QueueChange));
+          }
+
+        //   Simulator::Schedule (Seconds (0.00001), &TraceRtt, "mptest-rtt.data");
         }
-      bottleNeckLink.EnablePcap (
-          "lrouter", leftRouter->GetDevice (i)); /// PCAP: a binary format for packet capture
-      leftRouter->GetDevice (i)->TraceConnectWithoutContext ("MacTx",
-                                                             MakeCallback (&PktArrivalLeft));
-      leftRouter->GetDevice (i)->TraceConnectWithoutContext ("MacTxDrop",
-                                                             MakeCallback (&PktDropLeft));
-      leftRouter->GetDevice (i)->TraceConnectWithoutContext ("PhyRxDrop",
-                                                             MakeCallback (&PktDropOverflowLeft));
-    }
+    // }
+
   Config::ConnectWithoutContext ("/NodeList/1/$ns3::TcpL4Protocol/SocketList/0/RTT",
                                  MakeCallback (&RttTracer));
 
