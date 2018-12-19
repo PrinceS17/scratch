@@ -119,7 +119,7 @@ main(int argc, char *argv[])
     string cRate = "1Mbps";
     string bRate = "1kbps";
     string bDelay = "2ms";
-    double tStop = 5.0;
+    double tStop = 10.0;
     string qType = "RED";
     uint16_t port = 5001;
 
@@ -160,9 +160,6 @@ main(int argc, char *argv[])
     cout << "MAC: " << d.GetRight()->GetDevice(0)->GetAddress() << endl;
 
     Simulator::Schedule(Seconds(10), &handler, qDiscs);
-
-    // cout << "# Pkt: " << qDiscs.Get(0)->GetNPackets() << endl;
-    // cout << "Q Size: " << qDiscs.Get(0)->GetCurrentSize() << endl;
 
     // Assign IP Addresses
     d.AssignIpv4Addresses (Ipv4AddressHelper ("10.1.1.0", "255.255.255.0"),
