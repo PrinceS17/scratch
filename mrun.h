@@ -23,12 +23,24 @@ using namespace std;
 using namespace ns3;
 
 // should first set before building the topology
-struct Group
+class Group
 {
+public:
+    Group(map<string, vector<uint32_t>> txMap, map<string, vector<uint32_t>> rxMap, map<string, uint32_t> portMap)
+        : txMap(txMap), rxMap(rxMap), portMap(portMap)
+        {
+
+        }
+    ~Group();
+
+public:
+    uint32_t N;                 // number of all nodes including router
     uint32_t routerId;          // router ID, specified after building topology
-    vector<uint32_t> nodeId;    // collection of all nodes with the same mbox
+    vector<uint32_t> nodeId;    // collection of all nodes with the same mbox (except routers)
     vector<string> rateLv;      // collection all rate in this group
-    map <string, vector<uint32_t>> lvMap;   // sort each node by its data rate (like client, attacker before)
+    multimap <uint32_t, uint32_t> nodeMap;      // tx-rx node map: multi-tx-multi-rx map!
+    map <string, vector<uint32_t>> txRateMap;   // sort each node by its data rate (like client, attacker before)
+    map <uint32_t, string> rate;        // tx node to rate
     map <string, uint32_t> portMap;     // port for every rate level (abstract for client and attacker)
 };
 
@@ -153,6 +165,7 @@ private:        // parameters
     vector<Group> groups;       // group node by different mbox: need testing such vector declaration
 
     uint32_t pktSize;           // 1000 kB
+    double rtStart;             // start time of this run (the initial one)
     double rtStop;              // stop time of this run
     ProtocolType protocol;
     double nSender;             // # network sender, different from that of mbox!

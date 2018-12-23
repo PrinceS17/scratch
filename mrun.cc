@@ -15,3 +15,15 @@
  */
 
 #include "ns3/mrun.h"
+
+using namespace std;
+using namespace ns3;
+
+RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, double delay, string bw, uint32_t size)
+{
+    // constant setting
+    int sum = 0;
+    for(Group g:groups)
+        sum += g.N;
+    nSender = 
+}
