@@ -19,11 +19,33 @@
 using namespace std;
 using namespace ns3;
 
-RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, double delay, string bw, uint32_t size)
+RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, double delay, uint32_t size)
 {
     // constant setting
-    int sum = 0;
+    nSender = 0;
+    nReceiver = 0;
     for(Group g:groups)
-        sum += g.N;
-    nSender = 
+    {
+        nSender += g.txId.size();
+        nReceiver += g.rxId.size();
+    }
+    groups = grp;
+    pktSize = size;
+    protocol = pt;
+    this->delay = delay;
+
+}
+
+void RunningModule::buildTopology(vector<Group> grp)
+{
+    // use dumbbell structure for now
+    
+
+}
+
+int main ()
+{
+
+
+    return 0;
 }

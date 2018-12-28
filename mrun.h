@@ -26,22 +26,59 @@ using namespace ns3;
 class Group
 {
 public:
-    Group(map<string, vector<uint32_t>> txMap, map<string, vector<uint32_t>> rxMap, map<string, uint32_t> portMap)
-        : txMap(txMap), rxMap(rxMap), portMap(portMap)
+    Group(map <uint32_t, string> tx2rate1, vector<uint32_t> rxId1, map<string, uint32_t> rate2port1):
+        tx2rate(tx2rate1), rxId(rxId1), rate2port(rate2port1)
         {
 
+            // some direct visit exist?
+            for(pair<uint32_t, string> pid:tx2rate)
+            {
+                // txId and rates vector construction
+                if(find(txId.begin(), txId.end(), pid.first) == txId.end())
+                    txId.push_back(pid.first);
+                if(find(rates.begin(), rates.end(), pid.second) == rates.end())     // need testing
+                    rates.push_back(pid.second);
+
+                // rate 2 tx map initialization
+                if(rate2tx.find(pid.second) == rate2tx.end())
+                    rate2tx[pid.second] = vector<uint32_t>();
+                rate2tx[pid.second].push_back(pid.first);
+            }
+
+            N = txId.size() + rxId.size() + 2;
+
+            for(pair<string, uint32_t> pid:rate2port)
+            {
+                if(find(ports.begin(), ports.end(), pid.second) == ports.end())
+                    ports.push_back(pid.second);
+            }
         }
     ~Group();
+    void insertLink(uint32_t tx, uint32_t rx)
+    {
+        tx2rx.insert(pair<uint32_t, uint32_t>(tx, rx));
+    }
+    /* links: txs[i] -> rxs[i] */
+    void insertLink(vector<uint32_t> txs, vector<uint32_t> rxs)
+    {
+        for(int i = 0; i < txs.size(); i ++)
+            insertLink(txs.at(i), rxs.at(i));
+    }
 
 public:
     uint32_t N;                 // number of all nodes including router
-    uint32_t routerId;          // router ID, specified after building topology
-    vector<uint32_t> nodeId;    // collection of all nodes with the same mbox (except routers)
-    vector<string> rateLv;      // collection all rate in this group
-    multimap <uint32_t, uint32_t> nodeMap;      // tx-rx node map: multi-tx-multi-rx map!
-    map <string, vector<uint32_t>> txRateMap;   // sort each node by its data rate (like client, attacker before)
-    map <uint32_t, string> rate;        // tx node to rate
-    map <string, uint32_t> portMap;     // port for every rate level (abstract for client and attacker)
+    // vector<uint32_t> nodeId;  // collection of all nodes with the same mbox (except routers), seems not needed now??
+    vector<uint32_t> routerId;  // router ID, specified after building topology, [tx router, rx router]
+    vector<uint32_t> txId;
+    vector<uint32_t> rxId;
+    vector<string> rates;       // collection all rate in this group
+    vector<uint32_t> ports;
+
+
+    multimap <uint32_t, uint32_t> tx2rx;      // tx-rx node map: m-in-n-out map, test m!=n in later version
+    map <string, vector<uint32_t>> rate2tx;   // sort each node by its data rate (like client, attacker before)
+    map <uint32_t, string> tx2rate;        // tx node to rate
+    map <string, uint32_t> rate2port;     // port for every rate level (abstract for client and attacker)
 };
 
 class RunningModule
@@ -50,22 +87,22 @@ public:
     /**
      * \brief Initialize the running module, including setting start and stop time, the 
      * bottleneck link, the data rates and the topology. Currently should use dumpbell to
-     * realize the symmetric topology. Note the routerId of Group should be completed.
+     * realize the symmetric topology. 
      * 
      * \param t Vector containing start and stop time.
      * \param grp Vector containing node group which specifies their rates and mboxes.
      * \param pt Protocal type, TCP or UDP.
      * \param delay Bottleneck link delay.
-     * \param bw Bottleneck link bandwidth.
      * \param rate Vector of different level of data rate, e.g. {1kbps, 10kbps, 1Mbps} 
      * for three groups.
      * \param size Packet size, 1000 kB by default.
      */
-    RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, double delay, string bw, uint32_t size = 1000);
+    RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, double delay, uint32_t size = 1000);
     ~RunningModule ();
     /**
      * \brief Build the network topology from link (p2p) to network layer (stack). p2p link 
-     * attributes should be carefully set (not including queue setting and IP assignment).
+     * attributes should be carefully set (not including queue setting and IP assignment). 
+     * Note the routerId of Group should be completed.
      * 
      * \param grp Vector including node group with rate level.
      */
@@ -168,8 +205,6 @@ private:        // parameters
     double rtStart;             // start time of this run (the initial one)
     double rtStop;              // stop time of this run
     ProtocolType protocol;
-    double nSender;             // # network sender, different from that of mbox!
-    double nReceiver;           // # network receiver
 
     // queue
     string qType = "RED";       // specified for queue disc
@@ -179,7 +214,6 @@ private:        // parameters
     // link related
     string normalBw = "1Gbps";
     vector<string> bottleneckBw = vector<string>();
-    vector<string> txRate = vector<string>();   // extend by push back
     string delay;
     string mtu = "1599";        // p2p link setting
 
