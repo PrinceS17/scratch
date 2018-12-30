@@ -17,20 +17,24 @@
 #ifndef MRUN_H
 #define MRUN_H
 
-# include "ns3/mbox.h"
+#include "ns3/mbox.h"
 
 using namespace std;
 using namespace ns3;
+
+namespace ns3 {
+
+// NS_LOG_COMPONENT_DEFINE ("RunningModule");
 
 // should first set before building the topology
 class Group
 {
 public:
-    Group(map <uint32_t, string> tx2rate1, vector<uint32_t> rxId1, map<string, uint32_t> rate2port1):
-        tx2rate(tx2rate1), rxId(rxId1), rate2port(rate2port1)
+    Group(vector<uint32_t> rid, map<uint32_t, string> tx2rate1, vector<uint32_t> rxId1, map<string, uint32_t> rate2port1):
+        routerId(rid), tx2rate(tx2rate1), rxId(rxId1), rate2port(rate2port1)
         {
-
-            // some direct visit exist?
+            // some direct visit exist? no at least from stackoverflow
+            // need unit testing!
             for(pair<uint32_t, string> pid:tx2rate)
             {
                 // txId and rates vector construction
@@ -52,8 +56,16 @@ public:
                 if(find(ports.begin(), ports.end(), pid.second) == ports.end())
                     ports.push_back(pid.second);
             }
+            /* Print path vector to console */
+            cout << "TX ID: ";
+            copy(txId.begin(), txId.end(), ostream_iterator<uint32_t>(cout, " "));
+            cout << "\nrates vector: ";
+            copy(rates.begin(), rates.end(), ostream_iterator<string>(cout, " "));
+            cout << "\nports: ";
+            copy(ports.begin(), ports.end(), ostream_iterator<uint32_t>(cout, " "));
+            cout << "\nN: " << N << endl << endl;
         }
-    ~Group();
+    ~Group() {}
     void insertLink(uint32_t tx, uint32_t rx)
     {
         tx2rx.insert(pair<uint32_t, uint32_t>(tx, rx));
@@ -68,7 +80,7 @@ public:
 public:
     uint32_t N;                 // number of all nodes including router
     // vector<uint32_t> nodeId;  // collection of all nodes with the same mbox (except routers), seems not needed now??
-    vector<uint32_t> routerId;  // router ID, specified after building topology, [tx router, rx router]
+    vector<uint32_t> routerId;  // router ID, [tx router, rx router]
     vector<uint32_t> txId;
     vector<uint32_t> rxId;
     vector<string> rates;       // collection all rate in this group
@@ -97,7 +109,7 @@ public:
      * for three groups.
      * \param size Packet size, 1000 kB by default.
      */
-    RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, double delay, uint32_t size = 1000);
+    RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, uint32_t size = 1000);
     ~RunningModule ();
     /**
      * \brief Build the network topology from link (p2p) to network layer (stack). p2p link 
@@ -109,7 +121,7 @@ public:
     void buildTopology(vector<Group> grp);
     /**
      * \brief Configure all the network entities after finishing building the topology. The process
-     * is: queue, ip assignment, sink app and sender app setting, mbox installation, start 
+     * is: queue, ip assignment (in setQueue), sink app and sender app setting, mbox installation, start 
      * and stop the module. 
      * 
      * \param grp Node group with rate level.
@@ -122,16 +134,17 @@ public:
     void configure(vector<Group> grp, double stopTime, ProtocolType pt, vector<string> bw, string delay, vector<double> Th=vector<double>());
     /**
      * \brief Set queue (RED by default, may need other function for other queue) and return 
-     * a queue disc container for tracing the packet drop by RED queue.
+     * a queue disc container for tracing the packet drop by RED queue. Later assign Ipv4 
+     * addresses for all p2p net devices.
      * 
      * \param grp Vector including node group with rate level.
      * \param Th In format [MinTh, MaxTh], if empty, then use ns-3 default.
-     * \param bw Link bandwidth collection.
-     * \param delay Link delay.
+     * \param bw Bottleneck Link bandwidth collection.
+     * \param delay Bottleneck link delay.
      * 
      * \returns A queue disc container on router that we are interested in.
      */
-    QueueDiscContainer setQueue(vector<Group> grp, vector<string> bw, string delay,  vector<double> Th=vector<double>());
+    QueueDiscContainer setQueue(vector<Group> grp, vector<string> bw, vector<string> delay, vector<double> Th=vector<double>());
     /**
      * \brief Set the sink application (fetch protocol from member)
      * 
@@ -185,12 +198,38 @@ public:
      */ 
     void stop();
 
+    /**
+     * \brief Set node given group and id.
+     * 
+     * \param pn The node to set.
+     * \param i The index of group in groups.
+     * \param id Node id in group g.
+     */
+    void SetNode(Ptr<Node> pn, uint32_t i, uint32_t id);
+    /**
+     * \brief Set node given group and n (inside group No. ).
+     * 
+     * \param pn The node to set.
+     * \param type The type of node: sender/receiver/router: 0/1/2.
+     * \param i The index of group in groups.
+     * \param n The inside group No. 
+     */
+    void SetNode(Ptr<Node> pn, uint32_t type, uint32_t i, uint32_t n);
+    /**
+     * \brief Get node from group and id. Should be exactly inverse of SetNode();
+     * 
+     * \param i The index of group in groups.
+     * \param id Node id in group g.
+     * \param u Unit length of a group's nodes.
+     */
+    Ptr<Node> GetNode(uint32_t i, uint32_t id);
+    
 public:         // network entity
     NodeContainer nodes;        // all nodes in the topology
     NodeContainer sender;       // fetch each group by index/id
     NodeContainer receiver;
-    NetDeviceContainer txDev;   // tx net dev, for mbox mac tx and drop tracing
-    NetDeviceContainer rxDev;   // rx net dev, for mbox pkt rx tracing
+    NodeContainer router;
+    
     QueueDiscContainer qc;      // queue container for trace
     ApplicationContainer sinkApp;   // sink app
     vector< Ptr<MyApp> > senderApp;   // sender app: need testing!
@@ -202,9 +241,11 @@ private:        // parameters
     vector<Group> groups;       // group node by different mbox: need testing such vector declaration
 
     uint32_t pktSize;           // 1000 kB
+    uint32_t u;                 // unit size of group leaves
     double rtStart;             // start time of this run (the initial one)
     double rtStop;              // stop time of this run
     ProtocolType protocol;
+
 
     // queue
     string qType = "RED";       // specified for queue disc
@@ -214,9 +255,12 @@ private:        // parameters
     // link related
     string normalBw = "1Gbps";
     vector<string> bottleneckBw = vector<string>();
+    vector<string> bottleneckDelay = vector<string>();
     string delay;
     string mtu = "1599";        // p2p link setting
 
 };
+
+}
 
 #endif

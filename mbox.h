@@ -57,12 +57,12 @@ using namespace std;
 using namespace ns3;
 
 // enum ProtocolType {TCP, UCP};
+namespace ns3 {
+
+NS_LOG_COMPONENT_DEFINE ("MiddlePoliceBox");
 
 class MiddlePoliceBox
 {
-public:
-    enum FairType {NATURAL, PERSENDER};     // Fairness type
-
 public:
     /**
      * \brief Initialize the rwnd, cwnd and start monitoring and control.
@@ -73,14 +73,19 @@ public:
      * \param th Loss rate threshold.
      * \param isEDrop if enable SetEarlyDrop of the net device.
      */
-    MiddlePoliceBox (vector<uint32_t> num, double tStop, ProtocolType prot, double beta = 0.8, double th = 0.05, uint32_t wnd = 100, bool isEDrop = true);
+    MiddlePoliceBox (vector<uint32_t> num, double tStop, ProtocolType prot, double beta = 0.8, double th = 0.05, uint32_t wnd = 50, bool isEDrop = true);
     ~MiddlePoliceBox ();
+
+    friend bool operator == (const MiddlePoliceBox& lhs, const MiddlePoliceBox& rhs)
+    { return lhs.MID == rhs.MID; }
+    friend bool operator != (const MiddlePoliceBox& lhs, const MiddlePoliceBox& rhs)
+    { return lhs.MID != rhs.MID; }
     /**
      * \brief Install this mbox to given net device.
      * 
-     * \param PointToPointNetDevice The device that we install mbox in.
+     * \param NetDevice The device that we install mbox in.
      */
-    void install(Ptr<PointToPointNetDevice> device);
+    void install(Ptr<NetDevice> device);
     /**
      * \brief This method is called when a packet arrives and is ready to send.
      * In this method, receive window of mbox will be updated and it will set
@@ -96,7 +101,7 @@ public:
      * 
      * \param packet The packet dropped.
      */
-    void onQueueDrop(Ptr<const Packet> p);
+    void onQueueDrop(Ptr<const QueueDiscItem> qi);
     /**
      * \brief Method is called when a packet is received by destination (e.g. dst router).
      * # RX packet (rwnd) will be updated. And also update SLR when hitting slrWnd (periodically
@@ -139,10 +144,9 @@ public:     // values ideally know, initialize() to set
 private:    // values can/should be known locally inside mbox
     vector<uint32_t> cwnd;          
     vector<uint32_t> mDrop;     // drop window due to mbox, basically setEarlyDrop()
-    double beta;                // parameter for update llr
-    double lrTh;                // loss rate threshold
     double slr;                 // short-term loss rate, total
     vector<double> llr;         // long-term loss rate
+    vector<double> dRate;        // rx data rate in kbps
     
     uint32_t nSender;
     uint32_t nClient;       // initial # sender with normal traffic, might change (2nd stage work)
@@ -151,15 +155,20 @@ private:    // values can/should be known locally inside mbox
     uint32_t slrWnd;        // # packet interval of slr update
     bool isEarlyDrop;
     double tStop;           // the stop time
+    double beta;            // parameter for update llr
+    double lrTh;            // loss rate threshold
 
     // internal parameters
+    int MID;                            // mbox ID
     Ptr<PointToPointNetDevice> device;  // where mbox is installed
     vector< vector<string> > fnames;    // for statistics
     vector< string> singleNames;
-    vector< vector<ofstream> > fout;     // for statistics: output data to file
+    vector< vector<ofstream> > fout;    // for statistics: output data to file
     vector< ofstream > singleFout;      // data irrelated to sender, e.g. slr, queue size
     double normSize;                    // normalized in kbit
     ProtocolType protocol;
 };
+
+}
 
 #endif
