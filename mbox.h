@@ -96,6 +96,13 @@ public:
      */
     void onMacTx(Ptr<const Packet> p);
     /**
+     * \brief Called similar to mac tx except the mbox is paused and thus doesn't drop 
+     * packet to control the flow.
+     * 
+     * \param packet The packet arrived.
+     */
+    void onMacTxWoDrop(Ptr<const Packet> p);
+    /**
      * \brief Method is called when a packet is dropped by queue (e.g. RED), which 
      * means the link is dropping packet. So # link drop (lDrop) will be updated here.
      * 
@@ -131,6 +138,10 @@ public:
      * \param interval Time interval between this and next data collection.
      */
     void statistic(double interval);
+    /**
+     * \brief Stop the mbox function by setting the stop sign.
+     */
+    void stop();
 
 public:     // values ideally know, initialize() to set
     vector<uint32_t> rwnd;      // receive window of mbox
@@ -167,6 +178,7 @@ private:    // values can/should be known locally inside mbox
     vector< ofstream > singleFout;      // data irrelated to sender, e.g. slr, queue size
     double normSize;                    // normalized in kbit
     ProtocolType protocol;
+    bool isStop;
 };
 
 }

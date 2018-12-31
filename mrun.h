@@ -130,7 +130,7 @@ public:
      * \param delay Delay of the links. (to be determined)
      * \param Th In format [MinTh, MaxTh].
      */ 
-    void configure(double stopTime, ProtocolType pt, vector<string> bw, string delay, vector<double> Th=vector<double>());
+    void configure(double stopTime, ProtocolType pt, vector<string> bw, vector<string> delay, vector<MiddlePoliceBox> mboxes, vector<double> Th=vector<double>());
     /**
      * \brief Set queue (RED by default, may need other function for other queue) and return 
      * a queue disc container for tracing the packet drop by RED queue. Later assign Ipv4 
