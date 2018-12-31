@@ -30,8 +30,8 @@ namespace ns3 {
 class Group
 {
 public:
-    Group(vector<uint32_t> rid, map<uint32_t, string> tx2rate1, vector<uint32_t> rxId1, map<string, uint32_t> rate2port1):
-        routerId(rid), tx2rate(tx2rate1), rxId(rxId1), rate2port(rate2port1)
+    Group(vector<uint32_t> rtid, map<uint32_t, string> tx2rate1, vector<uint32_t> rxId1, map<string, uint32_t> rate2port1):
+        routerId(rtid), tx2rate(tx2rate1), rxId(rxId1), rate2port(rate2port1)
         {
             // some direct visit exist? no at least from stackoverflow
             // need unit testing!
@@ -122,16 +122,15 @@ public:
     /**
      * \brief Configure all the network entities after finishing building the topology. The process
      * is: queue, ip assignment (in setQueue), sink app and sender app setting, mbox installation, start 
-     * and stop the module. 
+     * and stop the module. Note that all the argument of configure take effect.
      * 
-     * \param grp Node group with rate level.
-     * \param relative stop Time Stop time of this run.
+     * \param stopTime Relative stop time of this run.
      * \param pt Transport Protocol.
      * \param bw Vector of the bottleneck links.
      * \param delay Delay of the links. (to be determined)
      * \param Th In format [MinTh, MaxTh].
      */ 
-    void configure(vector<Group> grp, double stopTime, ProtocolType pt, vector<string> bw, string delay, vector<double> Th=vector<double>());
+    void configure(double stopTime, ProtocolType pt, vector<string> bw, string delay, vector<double> Th=vector<double>());
     /**
      * \brief Set queue (RED by default, may need other function for other queue) and return 
      * a queue disc container for tracing the packet drop by RED queue. Later assign Ipv4 
@@ -145,6 +144,12 @@ public:
      * \returns A queue disc container on router that we are interested in.
      */
     QueueDiscContainer setQueue(vector<Group> grp, vector<string> bw, vector<string> delay, vector<double> Th=vector<double>());
+    /**
+     * \brief Set the address for sender, receiver and router.
+     * 
+     * \returns A ipv4 internet container for later specifying destination's address.
+     */
+    Ipv4InterfaceContainer setAddress();
     /**
      * \brief Set the sink application (fetch protocol from member)
      * 
@@ -164,30 +169,46 @@ public:
     vector< Ptr<MyApp> > setSender(vector<Group> grp, ProtocolType pt);
     /**
      * \brief Set one single network flow from sender to sink. Basically called by setSender.
+     * Note rate and port are already specified in member groups.
      * 
-     * \param index In format: [sender, receiver, tag] to indicate src and des 
-     * (fetch from nodes, RxDev or so)
-     * \param rate data rate of this flow.
-     * \param port port of the flow.
-     * \param pt Protocol type, TCP or UDP, set from outside will change member.
+     * \param i Group id.
+     * \param tId Tx id in the group of the flow.
+     * \param rId Rx id in the group of the flow.
+     * \param tag Tag value attached to this flow.
      * 
      * \returns A pointer to this application.
      */
-    Ptr<MyApp> netFlow(vector<uint32_t> index, string rate, uint32_t port);
+    Ptr<MyApp> netFlow(uint32_t i, uint32_t tId, uint32_t rId, uint32_t tag);
     /**
      * \brief Connect to the installed mboxes and begin tracing.
      * 
      * \param mboxes Mboxes that installed on the routers.
      * \param grp Node group with rate level.
+     * \param interval Interval of mbox's detection.
+     * \param logInterval Interval of mbox's logging for e.g. data rate, llr, slr.
      */
-    void connectMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp);
+    void connectMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp, double interval, double logInterval);
     /**
-     * \brief Disconnect the installed mboxes and end tracing.
+     * \brief Stop the installed mboxes and disconnect the tracing.
      * 
      * \param mboxes Mboxes that installed on the routers.
      * \param grp Node group with rate level.
      */
     void disconnectMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp);
+    /**
+     * \brief Pause the mbox, i.e. stop control (early drop) but continue detecting packets.
+     * 
+     * \param mboxes Mboxes that installed on the routers.
+     * \param grp Node group with rate level.
+     */
+    void pauseMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp);
+    /**
+     * \brief Resume the mbox, i.e. continue to both detect and drop the packets.
+     * 
+     * \param mboxes Mboxes that installed on the routers.
+     * \param grp Node group with rate level.
+     */
+    void resumeMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp);
     /**
      * \brief Start all the application from Now() and also start the mbox detection by tracing.
      */
@@ -220,9 +241,15 @@ public:
      * 
      * \param i The index of group in groups.
      * \param id Node id in group g.
-     * \param u Unit length of a group's nodes.
      */
     Ptr<Node> GetNode(uint32_t i, uint32_t id);
+    /**
+     * \brief Get ipv4 address for socket destination setting.
+     * 
+     * \param i The index of group in groups.
+     * \param id Node id in group g. 
+     */
+    Ipv4Address GetIpv4Addr(uint32_t i, uint32_t id);
     
 public:         // network entity
     NodeContainer nodes;        // all nodes in the topology
@@ -230,7 +257,8 @@ public:         // network entity
     NodeContainer receiver;
     NodeContainer router;
     
-    QueueDiscContainer qc;      // queue container for trace
+    QueueDiscContainer qc;          // queue container for trace
+    Ipv4InterfaceContainer ifc;     // ipv4 interface container for flow destination specification
     ApplicationContainer sinkApp;   // sink app
     vector< Ptr<MyApp> > senderApp;   // sender app: need testing!
 
@@ -245,8 +273,7 @@ private:        // parameters
     double rtStart;             // start time of this run (the initial one)
     double rtStop;              // stop time of this run
     ProtocolType protocol;
-
-
+    
     // queue
     string qType = "RED";       // specified for queue disc
     double minTh = 100;

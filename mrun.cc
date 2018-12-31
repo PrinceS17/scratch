@@ -19,6 +19,8 @@
 using namespace std;
 using namespace ns3;
 
+typedef multimap<uint32_t, uint32_t>::iterator mmap_iter;
+
 void RunningModule::SetNode(Ptr<Node> pn, uint32_t i, uint32_t id)
 {
     Group g = groups.at(i);
@@ -62,11 +64,31 @@ Ptr<Node> RunningModule::GetNode(uint32_t i, uint32_t id)
 {
     Group g = groups.at(i);
     vector<uint32_t>::iterator j = find(g.txId.begin(), g.txId.end(), id);
-    if( j != g.txId.end()) return sender.Get(i*u + (uint32_t)(j - g.txId.begin()));
+    if( j != g.txId.end()) 
+        return sender.Get(i*u + (uint32_t)(j - g.txId.begin()));
     j = find(g.rxId.begin(), g.rxId.end(), id);
-    if( j != g.rxId.end()) return receiver.Get(i*u + (uint32_t)(j - g.rxId.begin()));
+    if( j != g.rxId.end()) 
+        return receiver.Get(i*u + (uint32_t)(j - g.rxId.begin()));
     j = find(g.routerId.begin(), g.routerId.end(), id);     // should be 0/1
     return router.Get(i * 2 + (uint32_t)(j - g.routerId.begin()));
+}
+
+Ipv4Address RunningModule::GetIpv4Addr(uint32_t i, uint32_t id)     // counting index easily goes wrong: need testing 
+{
+    Group g = groups.at(i);
+    NS_LOG_FUNCTION("id: " + to_string(id));   
+    
+    vector<uint32_t>::iterator j = find(g.txId.begin(), g.txId.end(), id);
+    if(j != g.txId.end()) 
+        return ifc.GetAddress(i*u + (uint32_t)(j - g.txId.begin()));
+    j = find(g.rxId.begin(), g.rxId.end(), id);
+    
+    if( j != g.rxId.end()) 
+    {   
+        return ifc.GetAddress(sender.GetN() + i*u + (uint32_t)(j - g.rxId.begin()));
+    }
+    j = find(g.routerId.begin(), g.routerId.end(), id);
+    return ifc.GetAddress(sender.GetN() + receiver.GetN() + i*2 + (uint32_t)(j - g.routerId.begin()));
 }
 
 RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, uint32_t size)
@@ -81,6 +103,8 @@ RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType p
     }
     groups = grp;
     pktSize = size;
+    rtStart = t.at(0);
+    rtStop = t.at(1);
     protocol = pt;
     bottleneckBw = bnBw;
     bottleneckDelay = bnDelay;
@@ -167,6 +191,19 @@ void RunningModule::buildTopology(vector<Group> grp)
 
 }
 
+void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> bw, vector<string> delay, vector<MiddlePoliceBox> mboxes, vector<double> Th)
+{
+    protocol = pt;
+    bottleneckBw = bw;
+    bottleneckDelay = delay;
+    qc = setQueue(groups, bottleneckBw, bottleneckDelay, Th);
+    ifc = setAddress();
+    sinkApp = setSink(groups, protocol);
+    senderApp = setSender(groups, protocol);
+    connectMbox(mboxes, groups, 1.0, 1.0);      // manually set here 
+    start();
+}
+
 QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
 {
     // set RED queue
@@ -184,7 +221,20 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
                                 "LinkDelay", StringValue(bnDelay.at(i)));
         qc.Add(tch.Install(router.Get(2*i)->GetDevice(0)));       // sender's router queue needed only
     }
+
+    // test only
+    stringstream ss;
+    int x = 0;
+    ss << qc.Get(x)->GetTypeId() << " ; size now: " << qc.Get(x)->GetCurrentSize() << endl;
+    // ss << qc.Get(x)->GetStats() << "\nWake mode: " << qc.Get(x)->GetWakeMode();
+    NS_LOG_INFO(ss.str());
     
+    
+    return qc;
+}
+
+Ipv4InterfaceContainer RunningModule::setAddress()
+{
     // assign Ipv4 addresses
     Ipv4AddressHelper ih1("10.1.0.0", "255.255.255.252");
     Ipv4AddressHelper ih2("11.1.0.0", "255.255.255.252");
@@ -193,38 +243,172 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
     for(int j = 0; j < sender.GetN(); j ++) ncTx.Add(sender.Get(j)->GetDevice(0));
     for(int j = 0; j < receiver.GetN(); j ++) ncRx.Add(receiver.Get(j)->GetDevice(0));
     for(int j = 0; j < router.GetN(); j ++) ncRt.Add(router.Get(j)->GetDevice(0));
-    ih1.Assign(ncTx);
-    ih2.Assign(ncRx);
-    ih3.Assign(ncRt);
+    
+    // collect interfaces
+    Ipv4InterfaceContainer ifc;
+    ifc.Add(ih1.Assign(ncTx));
+    ifc.Add(ih2.Assign(ncRx));
+    ifc.Add(ih3.Assign(ncRt));
     // actually we can also preserve these net device in header file also
 
-    // test only
-    stringstream ss;
-    int x = 0;
-    ss << qc.Get(x)->GetTypeId() << " ; size now: " << qc.Get(x)->GetCurrentSize() << endl;
-    ss << qc.Get(x)->GetStats() << "\nWake mode: " << qc.Get(x)->GetWakeMode();
-    NS_LOG_INFO(ss.str());
-    
-    
-    return qc;
+    return ifc;
 }
 
 ApplicationContainer RunningModule::setSink(vector<Group> grp, ProtocolType pt)
 {
+    string ptStr = pt == TCP? "ns3::TcpSocketFactory":"ns3::UdpSocketFactory";
+    for(int i = 0; i < grp.size(); i ++)
+    {
+        Group g = grp.at(i);
+        for(int j = 0; j < g.txId.size(); j ++)
+        {
+            uint32_t tid = g.txId.at(j);
+            uint32_t port = g.rate2port[ g.tx2rate[tid] ];
+            Address sinkAddr (InetSocketAddress(Ipv4Address::GetAny(), port));
+            PacketSinkHelper psk(ptStr, sinkAddr);
 
+            // find RX corresponding to the txId: equal_range, need testing
+            pair<mmap_iter, mmap_iter> res = g.tx2rx.equal_range(tid);
+            NS_LOG_INFO("TX ID: " + to_string(tid));
+            stringstream ss;
+            ss << "RX ID: ";
+            for(mmap_iter it = res.first; it != res.second; it ++)
+            {
+                sinkApp.Add(psk.Install(GetNode(i, it->second)));   // it->second: rx ids
+                ss << it->second << " ";
+            }
+            NS_LOG_INFO(ss.str());
+        }
+    }
+    return sinkApp;
 }
 
 vector< Ptr<MyApp> > RunningModule::setSender(vector<Group> grp, ProtocolType pt)
 {
-    
+    vector<Ptr<MyApp>> appc;
+    stringstream ss;
+    for(uint32_t i = 0; i < grp.size(); i ++)
+    {
+        cout << " " << i << endl;
+        Group g = grp.at(i);
+        for(auto tId:g.txId)
+        {
+            pair<mmap_iter, mmap_iter> res = g.tx2rx.equal_range(tId);
+            for(mmap_iter it = res.first; it != res.second; it ++)
+            {
+                vector<uint32_t>::iterator it2 = find(g.txId.begin(), g.txId.end(), tId);
+                uint32_t tag = i*u + (uint32_t)(it2 - g.txId.begin());      // tag: index in sender
+                ss << "RX id: " << it->second << "; Tag : " << tag << "; " << tId << " -> " << it->second << endl;
+                NS_LOG_INFO(ss.str());
+                appc.push_back(netFlow(i, tId, it->second, tag));
+                // test output
+            }
+        }
+    }
+    NS_LOG_INFO(ss.str());
+    return appc;
 }
 
-Ptr<MyApp> RunningModule::netFlow(vector<uint32_t> index, string rate, uint32_t port)
+Ptr<MyApp> RunningModule::netFlow(uint32_t i, uint32_t tId, uint32_t rId, uint32_t tag)
 {
+    // parse rate and port
+    stringstream ss;
+    ss << "Group: " << i << "; TX: " << tId << "; RX: " << rId << endl;
+    NS_LOG_FUNCTION(ss.str());
+    string rate = groups.at(i).tx2rate.at(tId);
+    uint32_t port = groups.at(i).rate2port.at(rate);
 
+    // set socket
+    TypeId tpid = protocol == TCP? TcpSocketFactory::GetTypeId():UdpSocketFactory::GetTypeId();
+    Ptr<Socket> skt = Socket::CreateSocket(GetNode(i, tId), tpid); 
+    Address sinkAddr(InetSocketAddress(GetIpv4Addr(i, rId), port));
+    Ptr<MyApp> app = CreateObject<MyApp> ();
+    app->SetTagValue(tag);
+    app->Setup(skt, sinkAddr, pktSize, rate);
+    GetNode(i, tId)->AddApplication(app);
+
+    return app;
 }
-    
-    
+
+void RunningModule::connectMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp, double interval, double logInterval)
+{
+    for(int i = 0; i < grp.size(); i ++)
+    {
+        MiddlePoliceBox mb = mboxes.at(i);
+        Ptr<NetDevice> txRouter = router.Get(2*i)->GetDevice(0);
+        Ptr<NetDevice> rxRouter = router.Get(2*i + 1)->GetDevice(0);
+        
+        // install mbox
+        mb.install(txRouter);
+        NS_LOG_FUNCTION("Mbox installed on router " + to_string(i));
+
+        // tracing
+        txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mb));
+        rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mb));
+        qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mb));        
+
+        // flow control
+        mb.flowControl(PERSENDER, interval, logInterval);
+    }
+}
+
+void RunningModule::disconnectMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp)
+{
+    for(int i = 0; i < grp.size(); i ++)
+    {
+        MiddlePoliceBox mb = mboxes.at(i);
+        Ptr<NetDevice> txRouter = router.Get(2*i)->GetDevice(0);
+        Ptr<NetDevice> rxRouter = router.Get(2*i + 1)->GetDevice(0);
+
+        // stop the mbox and tracing
+        mb.stop();      // stop flow control and logging 
+        txRouter->TraceDisconnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mb));
+        rxRouter->TraceDisconnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mb));
+        qc.Get(i)->TraceDisconnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mb));        
+
+        NS_LOG_FUNCTION("Mbox " + to_string(i) + " stops.");
+    }
+}    
+
+void RunningModule::pauseMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp)
+{
+    for(int i = 0; i < grp.size(); i ++)
+    {
+        MiddlePoliceBox mb = mboxes.at(i);
+        Ptr<NetDevice> txRouter = router.Get(2*i)->GetDevice(0);
+        txRouter->TraceDisconnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mb));
+        txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTxWoDrop, &mb));
+    }
+}
+
+void RunningModule::resumeMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp)
+{
+    for(int i = 0; i < grp.size(); i ++)
+    {
+        MiddlePoliceBox mb = mboxes.at(i);
+        Ptr<NetDevice> txRouter = router.Get(2*i)->GetDevice(0);
+        txRouter->TraceDisconnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTxWoDrop, &mb));
+        txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mb));
+    }
+}
+
+void RunningModule::start()
+{
+    sinkApp.Start(Seconds(rtStart));
+    sinkApp.Stop(Seconds(rtStop));
+    for(int j = 0; j < senderApp.size(); j ++)
+    {
+        senderApp.at(j)->SetStartTime(Seconds(rtStart));
+        senderApp.at(j)->SetStopTime(Seconds(rtStop));
+    }
+}
+
+void RunningModule::stop()
+{
+    for(int j = 0; j < senderApp.size(); j ++)
+        senderApp.at(j)->SetStopTime(Seconds(0.0));     // stop now
+    sinkApp.Stop(Seconds(0.0));
+}   
 
 int main ()
 {
@@ -238,12 +422,13 @@ int main ()
     vector<string> bnDelay{"2ms"};
 
     // generating groups
-    vector<uint32_t> rid = {25, 49};
+    vector<uint32_t> rtid = {25, 49};
     map<uint32_t, string> tx2rate1 = {{10, "1Mbps"}, {11, "2Mbps"}};
     vector<uint32_t> rxId1 = {2,3};
     map<string, uint32_t> rate2port1 = {{"1Mbps", 80}, {"2Mbps", 90}};
     
-    Group g(rid, tx2rate1, rxId1, rate2port1);
+    Group g(rtid, tx2rate1, rxId1, rate2port1);
+    g.insertLink({10, 11}, {2, 3});
     vector<Group> grps(1, g);
 
     LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);
@@ -252,7 +437,17 @@ int main ()
     
     cout << "Building topology..." << endl;
     rm.buildTopology(grps);
-    rm.setQueue(grps, bnBw, bnDelay, vector<double>{100,250});
+    rm.qc = rm.setQueue(grps, bnBw, bnDelay, vector<double>{100,250});
+    rm.ifc = rm.setAddress();
+    rm.sinkApp = rm.setSink(grps, TCP);
+    rm.setSender(grps, TCP);
+
+    
+    cout << " Start running ... " << endl << endl;
+    Simulator::Stop(Seconds(t[1]));
+    Simulator::Run();
+    cout << " Destroying ... " << endl << endl;
+    Simulator::Destroy();
 
     return 0;
 }

@@ -38,6 +38,7 @@ MiddlePoliceBox::MiddlePoliceBox(vector<uint32_t> num, double tStop, ProtocolTyp
     MID = rand();
     protocol = prot;
     normSize = 8.0 / 1000;      // byte -> kbit
+    isStop = false;
     
     // monitor setting
     rwnd = vector<uint32_t> (nSender, 0);   // rwnd: use to record each senders' rate
@@ -126,6 +127,18 @@ MiddlePoliceBox::onMacTx(Ptr<const Packet> p)
 }
 
 void
+MiddlePoliceBox::onMacTxWoDrop(Ptr<const Packet> p)
+{
+    Ptr<const Packet> pcp = p->Copy();
+    MyTag tag;
+    if(!pcp->PeekPacketTag(tag)) return;
+    int index = tag.GetSimpleValue() - 1;
+    rwnd[index] ++;
+
+    NS_LOG_FUNCTION(" rwnd[" + to_string(index) + "] = " + to_string(rwnd[index]) + " (no drop here)");
+}
+
+void
 MiddlePoliceBox::onQueueDrop(Ptr<const QueueDiscItem> qi)
 {   
     Ptr<const Packet> pcp = qi->GetPacket()->Copy();
@@ -192,7 +205,8 @@ void
 MiddlePoliceBox::flowControl(FairType fairness, double interval, double logInterval)
 {
     // schedule
-    Simulator::Schedule(Seconds(interval), &MiddlePoliceBox::flowControl, this, fairness, interval, logInterval);
+    if(!isStop) 
+        Simulator::Schedule(Seconds(interval), &MiddlePoliceBox::flowControl, this, fairness, interval, logInterval);
     if(Simulator::Now().GetSeconds() < logInterval)
         Simulator::Schedule(Seconds(0.1), &MiddlePoliceBox::statistic, this, logInterval);
 
@@ -240,7 +254,8 @@ void
 MiddlePoliceBox::statistic(double interval)
 {
     static vector<uint32_t> lastRx2 = vector<uint32_t>(nSender, 0);
-    Simulator::Schedule(Seconds(interval), &MiddlePoliceBox::statistic, this, interval);
+    if(!isStop) 
+        Simulator::Schedule(Seconds(interval), &MiddlePoliceBox::statistic, this, interval);
     
     for(uint32_t i = 0; i < nSender; i ++)
     {   
@@ -262,6 +277,11 @@ MiddlePoliceBox::statistic(double interval)
     NS_LOG_INFO(ss.str());
 }
 
+void MiddlePoliceBox::stop()
+{
+    isStop = true;
+    NS_LOG_INFO("Stop mbox now.");
+}
 
 int
 main()
