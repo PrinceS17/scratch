@@ -997,6 +997,9 @@ main (int argc, char *argv[])
   // Install Stack to the whole nodes
   InternetStackHelper stack;
   d1.InstallStack (stack);
+  // for debug
+  cout << "#interfaces: " << d1.GetLeft()->GetObject<Ipv4>()->GetNInterfaces() << endl;
+  cout << endl;
 
   // RED queue disc
   QueueDiscContainer qdRight;
@@ -1014,6 +1017,10 @@ main (int argc, char *argv[])
     qdLeft = tch.Install(d1.GetLeft()->GetDevice(0));
   }
 
+  // for debug
+  cout << "Before assign...\n#interfaces: " << d1.GetLeft()->GetObject<Ipv4>()->GetNInterfaces() << endl;
+  cout << endl;
+
   // Assign IP Addresses
   // Three sets of address: the left, the right and the router
   d1.AssignIpv4Addresses (Ipv4AddressHelper ("10.1.0.0", "255.255.255.252"),
@@ -1022,6 +1029,10 @@ main (int argc, char *argv[])
 
   // obtain the p2p devices
   //===================End of Creating Network Topology===================//
+
+// for debug
+  cout << "before sink... \n #interfaces: " << d1.GetLeft()->GetObject<Ipv4>()->GetNInterfaces() << endl;
+  cout << endl;
 
   //==========================================================================//
   //===================Config the LEFT side nodes: sink or receiver===========//
@@ -1065,6 +1076,9 @@ main (int argc, char *argv[])
   //==========================================================================//
   //======================End of sink applications============================//
   //===========================================================================//
+// for debug
+  cout << "Before sender...\n #interfaces: " << d1.GetLeft()->GetObject<Ipv4>()->GetNInterfaces() << endl;
+  cout << endl;
 
   //==========================================================================//
   //================Creating the normal client applications===================//
@@ -1127,8 +1141,11 @@ main (int argc, char *argv[])
   router = d1.GetRight ();
   Ptr<Node> rightRouter = d1.GetRight ();
   Ptr<Node> leftRouter = d1.GetLeft ();
-  //std::cout << "number of devices: " << rightRouter->GetNDevices() << std::endl;
+  // std::cout << "number of devices: " << rightRouter->GetNDevices() << std::endl;
   cout << "trace (right): " << endl;
+
+
+  cout << "left router: " << leftRouter->GetDevice(0);
 
 
   /* 

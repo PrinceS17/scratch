@@ -36,9 +36,9 @@
 #include "ns3/traffic-control-module.h"
 #include "ns3/point-to-point-net-device.h"
 
-#include "ns3/apps.h"
 #include "ns3/tag.h"
-#include "ns3/tools.h"
+#include "tools.h"
+#include "apps.h"
 
 #include <iomanip>
 #include <fstream>
@@ -59,7 +59,6 @@ using namespace ns3;
 // enum ProtocolType {TCP, UCP};
 namespace ns3 {
 
-NS_LOG_COMPONENT_DEFINE ("MiddlePoliceBox");
 
 class MiddlePoliceBox
 {
@@ -74,7 +73,14 @@ public:
      * \param isEDrop if enable SetEarlyDrop of the net device.
      */
     MiddlePoliceBox (vector<uint32_t> num, double tStop, ProtocolType prot, double beta = 0.8, double th = 0.05, uint32_t wnd = 50, bool isEDrop = true);
+    MiddlePoliceBox () {}
+    /** 
+     * rewrite to construct the ofstream manually to fullfill the 
+     * copy-constructible requirement. 
+     * */
+    MiddlePoliceBox (const MiddlePoliceBox & );
     ~MiddlePoliceBox ();
+    
 
     friend bool operator == (const MiddlePoliceBox& lhs, const MiddlePoliceBox& rhs)
     { return lhs.MID == rhs.MID; }

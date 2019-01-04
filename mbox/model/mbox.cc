@@ -15,10 +15,171 @@
  */
 
 
-#include "ns3/mbox.h"
+#include "mbox.h"
+// #include "ns3/apps.h"
 
 using namespace std;
-using namespace ns3;
+
+namespace ns3{
+
+NS_LOG_COMPONENT_DEFINE ("MiddlePoliceBox");
+
+
+TypeId 
+MyTag::GetTypeId (void)
+{
+  static TypeId tid = TypeId ("ns3::MyTag")
+    .SetParent<Tag> ()
+    .AddConstructor<MyTag> ()
+    .AddAttribute ("SimpleValue",
+                   "A simple value",
+                   EmptyAttributeValue (),
+                   MakeUintegerAccessor (&MyTag::GetSimpleValue),
+                   MakeUintegerChecker<uint32_t> ())
+  ;
+  return tid;
+}
+TypeId 
+MyTag::GetInstanceTypeId (void) const
+{
+  return GetTypeId ();
+}
+uint32_t 
+MyTag::GetSerializedSize (void) const
+{
+  return 4;
+}
+void 
+MyTag::Serialize (TagBuffer i) const
+{
+  i.WriteU32 (m_simpleValue);
+}
+void 
+MyTag::Deserialize (TagBuffer i)
+{
+  m_simpleValue = i.ReadU32 ();
+}
+void 
+MyTag::Print (std::ostream &os) const
+{
+  os << "v=" << (uint32_t)m_simpleValue;
+}
+void 
+MyTag::SetSimpleValue (uint32_t value)
+{
+  m_simpleValue = value;
+}
+uint32_t 
+MyTag::GetSimpleValue (void) const
+{
+  return m_simpleValue;
+}
+
+//=========================================================================//
+//===============Beigining of Application definition=======================//
+//=========================================================================//
+
+MyApp::MyApp ()
+  : m_socket (0), 
+    m_peer (), 
+    m_packetSize (0), 
+    //m_nPackets (0), 
+    m_dataRate (0), 
+    m_sendEvent (), 
+    m_running (false), 
+    //m_packetsSent (0)
+    m_tagValue (0)
+{
+}
+
+MyApp::~MyApp()
+{
+  m_socket = 0;
+}
+
+void
+//MyApp::Setup (Ptr<Socket> socket, Address address, uint32_t packetSize, uint32_t nPackets, DataRate dataRate)
+MyApp::Setup (Ptr<Socket> socket, Address address, uint32_t packetSize, DataRate dataRate)
+{
+  m_socket = socket;
+  m_peer = address;
+  m_packetSize = packetSize;
+  //m_nPackets = nPackets;
+  m_dataRate = dataRate;
+}
+
+void
+MyApp::SetDataRate(DataRate rate)
+{
+  m_dataRate = rate;
+}
+
+void
+MyApp::SetTagValue(uint32_t value)
+{
+  m_tagValue = value;
+}
+
+void
+MyApp::StartApplication (void)
+{
+  cout << " Start apps..." << endl;
+  m_running = true;
+  //m_packetsSent = 0;
+  m_socket->Bind ();
+  m_socket->Connect (m_peer);
+  SendPacket ();
+}
+
+void 
+MyApp::StopApplication (void)
+{
+  m_running = false;
+
+  if (m_sendEvent.IsRunning ())
+    {
+      Simulator::Cancel (m_sendEvent);
+    }
+
+  if (m_socket)
+    {
+      m_socket->Close ();
+    }
+}
+
+void 
+MyApp::SendPacket (void)
+{
+  //create the tags
+  MyTag tag;
+  tag.SetSimpleValue (m_tagValue);
+
+  Ptr<Packet> packet = Create<Packet> (m_packetSize);
+  packet -> AddPacketTag (tag);//add tags
+
+  m_socket->Send (packet);
+
+  //if (++m_packetsSent < m_nPackets)
+    //{
+      ScheduleTx ();
+    //}
+}
+
+void 
+MyApp::ScheduleTx (void)
+{
+  if (m_running)
+    {
+      Time tNext (Seconds (m_packetSize * 8 / static_cast<double> (m_dataRate.GetBitRate ())));
+      m_sendEvent = Simulator::Schedule (tNext, &MyApp::SendPacket, this);
+    }
+}
+//=========================================================================//
+//===================End of Application definition=========================//
+//=========================================================================//
+
+
+
 
 MiddlePoliceBox::MiddlePoliceBox(vector<uint32_t> num, double tStop, ProtocolType prot, double beta, double th, uint32_t wnd, bool isEDrop)
 {
@@ -87,8 +248,33 @@ MiddlePoliceBox::MiddlePoliceBox(vector<uint32_t> num, double tStop, ProtocolTyp
     NS_LOG_INFO(ss.str());
 }
 
+MiddlePoliceBox::MiddlePoliceBox(const MiddlePoliceBox& mb):
+  rwnd(mb.rwnd), cwnd(mb.cwnd), mDrop(mb.mDrop), lDrop(mb.lDrop), totalRx(mb.totalRx), totalRxByte(mb.totalRxByte),
+  totalDrop(mb.totalDrop), lastDrop(mb.lastDrop), lastRx(mb.lastRx), slr(mb.slr), llr(mb.llr), dRate(mb.dRate),
+  nSender(mb.nSender), nClient(mb.nClient), nAttacker(mb.nAttacker), nReceiver(mb.nReceiver), slrWnd(mb.slrWnd),
+  isEarlyDrop(mb.isEarlyDrop), tStop(mb.tStop), beta(mb.beta), lrTh(mb.lrTh), MID(mb.MID), device(mb.device),
+  fnames(mb.fnames), singleNames(mb.singleNames), normSize(mb.normSize), protocol(mb.protocol), isStop(mb.isStop) 
+{
+    NS_LOG_FUNCTION(" Copy constructor. ");
+    for(uint32_t i = 0; i < nSender; i ++)
+    {
+        fout.push_back(vector<ofstream>());
+        for(uint32_t j = 0; j < fnames.at(i).size(); j ++)
+        {
+            remove(fnames.at(i).at(j).c_str());
+            fout.at(i).push_back(ofstream(fnames.at(i).at(j), ios::app | ios::out));
+        }
+    }
+    for(uint32_t i = 0; i < singleNames.size(); i ++)
+    {
+        remove(singleNames.at(i).c_str());
+        singleFout.push_back(ofstream(singleNames.at(i), ios::app | ios::out));
+    }
+}
+
 MiddlePoliceBox::~MiddlePoliceBox()
 {
+    NS_LOG_FUNCTION(" Destructor. ");
     clear();
     for(uint32_t i = 0; i < nSender; i ++)
     {
@@ -108,6 +294,7 @@ MiddlePoliceBox::install(Ptr<NetDevice> device)
 void
 MiddlePoliceBox::onMacTx(Ptr<const Packet> p)
 {
+    NS_LOG_FUNCTION(" Begin ... ");
     Ptr<const Packet> pcp = p->Copy();
     MyTag tag;
     if(!pcp->PeekPacketTag(tag)) return;
@@ -129,6 +316,7 @@ MiddlePoliceBox::onMacTx(Ptr<const Packet> p)
 void
 MiddlePoliceBox::onMacTxWoDrop(Ptr<const Packet> p)
 {
+    NS_LOG_FUNCTION(" Begin ... ");
     Ptr<const Packet> pcp = p->Copy();
     MyTag tag;
     if(!pcp->PeekPacketTag(tag)) return;
@@ -141,6 +329,7 @@ MiddlePoliceBox::onMacTxWoDrop(Ptr<const Packet> p)
 void
 MiddlePoliceBox::onQueueDrop(Ptr<const QueueDiscItem> qi)
 {   
+    NS_LOG_FUNCTION(" Begin ... ");
     Ptr<const Packet> pcp = qi->GetPacket()->Copy();
     MyTag tag;
     if(!pcp->PeekPacketTag(tag)) return;
@@ -156,6 +345,7 @@ MiddlePoliceBox::onQueueDrop(Ptr<const QueueDiscItem> qi)
 void
 MiddlePoliceBox::onPktRx(Ptr<const Packet> p)
 {
+    NS_LOG_FUNCTION(" Begin ... ");
     Ptr<const Packet> pcp = p->Copy();
     MyTag tag;
     if(!pcp->PeekPacketTag(tag)) return;
@@ -209,6 +399,7 @@ MiddlePoliceBox::flowControl(FairType fairness, double interval, double logInter
         Simulator::Schedule(Seconds(interval), &MiddlePoliceBox::flowControl, this, fairness, interval, logInterval);
     if(Simulator::Now().GetSeconds() < logInterval)
         Simulator::Schedule(Seconds(0.1), &MiddlePoliceBox::statistic, this, logInterval);
+    NS_LOG_FUNCTION(" Begin ... ");
 
     // loss rate update and capacity calculation
     double capacity = 0;
@@ -244,7 +435,7 @@ MiddlePoliceBox::flowControl(FairType fairness, double interval, double logInter
     ss << "flow control:   No.  rwnd   cwnd   mdrop  ldrop  llr" << endl;
     for (uint32_t i = 0; i < nSender; i ++)
         ss << "                " << i << "    " << rwnd[i] << "    " << cwnd[i] << "    " << mDrop[i]
-            << "    " << lDrop[i] << "    " << llr[i];
+            << "    " << lDrop[i] << "    " << llr[i] << endl;
     NS_LOG_INFO(ss.str());
 
     clear();
@@ -256,9 +447,11 @@ MiddlePoliceBox::statistic(double interval)
     static vector<uint32_t> lastRx2 = vector<uint32_t>(nSender, 0);
     if(!isStop) 
         Simulator::Schedule(Seconds(interval), &MiddlePoliceBox::statistic, this, interval);
-    
+    NS_LOG_FUNCTION(" Begin, nSender: " + to_string(nSender));
+        
     for(uint32_t i = 0; i < nSender; i ++)
-    {   
+    {
+        //debug   
         dRate[i] = (double)(totalRxByte[i] - lastRx2[i]) * normSize / interval;     // record rx data rate
         fout.at(i)[0] << Simulator::Now().GetSeconds() << " " << dRate.at(i) << " kbps" << endl; 
         lastRx2[i] = totalRxByte[i];                                                // record llr
@@ -273,7 +466,7 @@ MiddlePoliceBox::statistic(double interval)
     stringstream ss;
     ss << "\nstatistics:     No.  rate(kbps)  LLR" << endl;
     for(uint32_t i = 0; i < nSender; i ++)
-        ss << "                " << i << "    " << dRate.at(i) << "    " << llr.at(i);
+        ss << "                " << i << "    " << dRate.at(i) << "    " << llr.at(i) << endl;
     NS_LOG_INFO(ss.str());
 }
 
@@ -283,86 +476,88 @@ void MiddlePoliceBox::stop()
     NS_LOG_INFO("Stop mbox now.");
 }
 
-int
-main()
-{
-    double tStop = 20.0;
-    double interval = 1.0;
-    double logInterval = 1.0;
-    ProtocolType ptt = UDP;
-    string Protocol = ptt == TCP? "ns3::TcpSocketFactory":"ns3::UdpSocketFactory";
-    uint32_t port = 8080;
-    string bw = "10Mbps";
-    string txRate = "100Mbps";
-    LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);    // see function log to test
-    // LogComponentEnable("PointToPointNetDevice", LOG_FUNCTION);
-
-    NodeContainer n1;
-    n1.Create(2);
-    PointToPointHelper p2p;
-    p2p.SetChannelAttribute("Delay", StringValue("2ms"));
-    p2p.SetDeviceAttribute("DataRate", StringValue(bw));
-    NetDeviceContainer dev = p2p.Install(n1);
-    InternetStackHelper ish;
-    ish.Install(n1);
-
-    // queue setting
-    QueueDiscContainer qc;
-    TrafficControlHelper tch1;
-    // tch1.Uninstall(dev);
-    tch1.SetRootQueueDisc("ns3::RedQueueDisc",
-                        "MinTh", DoubleValue(5),
-                        "MaxTh", DoubleValue(25),
-                        "LinkBandwidth", StringValue(bw),
-                        "LinkDelay", StringValue("2ms"));
-    qc = tch1.Install(dev);
-    
-    Ipv4AddressHelper idh;
-    idh.SetBase("10.1.1.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifc = idh.Assign(dev);
-    
-    // sink app
-    Address sinkLocalAddr (InetSocketAddress (Ipv4Address::GetAny (), port));
-    ApplicationContainer sinkApp;
-    PacketSinkHelper psk(Protocol, sinkLocalAddr);
-    sinkApp = psk.Install(n1.Get(1));
-    sinkApp.Start(Seconds(0.0));
-    sinkApp.Stop(Seconds(tStop));
-
-    // tx application
-    TypeId tid = ptt == TCP? TcpSocketFactory::GetTypeId():UdpSocketFactory::GetTypeId();
-    Ptr<Socket> sockets = Socket::CreateSocket(n1.Get(0), tid);
-    Address sinkAddr(InetSocketAddress(ifc.GetAddress(1), port));
-    Ptr<MyApp> app = CreateObject<MyApp> () ;
-    app->SetTagValue(1);
-    app->Setup(sockets, sinkAddr, 1000, DataRate(txRate));
-    n1.Get(0)->AddApplication(app);
-    app->SetStartTime(Seconds(0));
-    app->SetStopTime(Seconds(tStop));
-
-    // test process here
-    MiddlePoliceBox mbox1(vector<uint32_t>{1,1,1,1}, tStop, ptt, 0.9);
-    mbox1.install(dev.Get(0));
-    cout << " Mbox Intalled. " << endl << endl;
-
-    // trace: need test, example online is: MakeCallback(&function, objptr), objptr is object pointer
-    dev.Get(0)->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mbox1));
-    dev.Get(1)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mbox1));
-    qc.Get(0)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mbox1));
-
-    // begin flow control
-    mbox1.flowControl(PERSENDER, interval, logInterval);
-
-    // routing
-    Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
-
-    // stop & run
-    cout << " Running ... " << endl << endl;
-    Simulator::Stop(Seconds(tStop));
-    Simulator::Run();
-
-    cout << " Destroying ... " << endl << endl;
-    Simulator::Destroy();
-
-    return 0;
 }
+
+// int
+// main()
+// {
+//     double tStop = 5.0;
+//     double interval = 1.0;
+//     double logInterval = 1.0;
+//     ProtocolType ptt = UDP;
+//     string Protocol = ptt == TCP? "ns3::TcpSocketFactory":"ns3::UdpSocketFactory";
+//     uint32_t port = 8080;
+//     string bw = "10Mbps";
+//     string txRate = "100Mbps";
+//     LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);    // see function log to test
+//     // LogComponentEnable("PointToPointNetDevice", LOG_FUNCTION);
+
+//     NodeContainer n1;
+//     n1.Create(2);
+//     PointToPointHelper p2p;
+//     p2p.SetChannelAttribute("Delay", StringValue("2ms"));
+//     p2p.SetDeviceAttribute("DataRate", StringValue(bw));
+//     NetDeviceContainer dev = p2p.Install(n1);
+//     InternetStackHelper ish;
+//     ish.Install(n1);
+
+//     // queue setting
+//     QueueDiscContainer qc;
+//     TrafficControlHelper tch1;
+//     // tch1.Uninstall(dev);
+//     tch1.SetRootQueueDisc("ns3::RedQueueDisc",
+//                         "MinTh", DoubleValue(5),
+//                         "MaxTh", DoubleValue(25),
+//                         "LinkBandwidth", StringValue(bw),
+//                         "LinkDelay", StringValue("2ms"));
+//     qc = tch1.Install(dev);
+    
+//     Ipv4AddressHelper idh;
+//     idh.SetBase("10.1.1.0", "255.255.255.0");
+//     Ipv4InterfaceContainer ifc = idh.Assign(dev);
+    
+//     // sink app
+//     Address sinkLocalAddr (InetSocketAddress (Ipv4Address::GetAny (), port));
+//     ApplicationContainer sinkApp;
+//     PacketSinkHelper psk(Protocol, sinkLocalAddr);
+//     sinkApp = psk.Install(n1.Get(1));
+//     sinkApp.Start(Seconds(0.0));
+//     sinkApp.Stop(Seconds(tStop));
+
+//     // tx application
+//     TypeId tid = ptt == TCP? TcpSocketFactory::GetTypeId():UdpSocketFactory::GetTypeId();
+//     Ptr<Socket> sockets = Socket::CreateSocket(n1.Get(0), tid);
+//     Address sinkAddr(InetSocketAddress(ifc.GetAddress(1), port));
+//     Ptr<MyApp> app = CreateObject<MyApp> () ;
+//     app->SetTagValue(1);
+//     app->Setup(sockets, sinkAddr, 1000, DataRate(txRate));
+//     n1.Get(0)->AddApplication(app);
+//     app->SetStartTime(Seconds(0));
+//     app->SetStopTime(Seconds(tStop));
+
+//     // test process here
+//     MiddlePoliceBox mbox1(vector<uint32_t>{1,1,1,1}, tStop, ptt, 0.9);
+//     mbox1.install(dev.Get(0));
+//     cout << " Mbox Intalled. " << endl << endl;
+
+//     // trace: need test, example online is: MakeCallback(&function, objptr), objptr is object pointer
+//     dev.Get(0)->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mbox1));
+//     dev.Get(1)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mbox1));
+//     qc.Get(0)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mbox1));
+
+//     // begin flow control
+//     mbox1.flowControl(PERSENDER, interval, logInterval);
+
+//     // routing
+//     Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
+
+//     // stop & run
+//     cout << " Running ... " << endl << endl;
+//     Simulator::Stop(Seconds(tStop));
+//     Simulator::Run();
+
+//     cout << " Destroying ... " << endl << endl;
+//     Simulator::Destroy();
+
+//     return 0;
+// }

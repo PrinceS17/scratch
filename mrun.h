@@ -30,6 +30,7 @@ namespace ns3 {
 class Group
 {
 public:
+    Group() = default;
     Group(vector<uint32_t> rtid, map<uint32_t, string> tx2rate1, vector<uint32_t> rxId1, map<string, uint32_t> rate2port1):
         routerId(rtid), tx2rate(tx2rate1), rxId(rxId1), rate2port(rate2port1)
         {
@@ -65,6 +66,7 @@ public:
             copy(ports.begin(), ports.end(), ostream_iterator<uint32_t>(cout, " "));
             cout << "\nN: " << N << endl << endl;
         }
+    Group(const Group &) = default;
     ~Group() {}
     void insertLink(uint32_t tx, uint32_t rx)
     {
