@@ -3,6 +3,7 @@
         "ostream": "cpp",
         "iosfwd": "cpp",
         "chrono": "cpp",
-        "type_traits": "cpp"
+        "type_traits": "cpp",
+        "iostream": "cpp"
     }
 }

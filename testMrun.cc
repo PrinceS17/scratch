@@ -173,9 +173,9 @@ int main()
     // no set queue for this test at first
 
     // set ipv4 address
-    rm.dv[0].AssignIpv4Addresses(Ipv4AddressHelper ("10.1.0.0", "255.255.255.252"),
-                          Ipv4AddressHelper ("11.1.0.0", "255.255.255.252"),
-                          Ipv4AddressHelper ("12.1.0.0", "255.255.255.252"));
+    rm.dv[0].AssignIpv4Addresses(Ipv4AddressHelper ("10.1.0.0", "255.255.255.0"),
+                          Ipv4AddressHelper ("11.1.0.0", "255.255.255.0"),
+                          Ipv4AddressHelper ("12.1.0.0", "255.255.255.0"));
     
     // sink app
     Address sinkLocalAddr (InetSocketAddress (Ipv4Address::GetAny (), port));
@@ -223,5 +223,5 @@ int main()
     Simulator::Run();
     cout << "Destroying ... " << endl;
     Simulator::Destroy();
-
+    return 0;
 }

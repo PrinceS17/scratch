@@ -164,6 +164,7 @@ private:    // values can/should be known locally inside mbox
     double slr;                 // short-term loss rate, total
     vector<double> llr;         // long-term loss rate
     vector<double> dRate;        // rx data rate in kbps
+    vector<uint32_t> lastRx2;   // for rate calculation only
     
     uint32_t nSender;
     uint32_t nClient;       // initial # sender with normal traffic, might change (2nd stage work)

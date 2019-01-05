@@ -123,7 +123,6 @@ MyApp::SetTagValue(uint32_t value)
 void
 MyApp::StartApplication (void)
 {
-  cout << " Start apps..." << endl;
   m_running = true;
   //m_packetsSent = 0;
   m_socket->Bind ();
@@ -195,7 +194,7 @@ MiddlePoliceBox::MiddlePoliceBox(vector<uint32_t> num, double tStop, ProtocolTyp
     lrTh = th; 
 
     // internal parameters
-    srand(time(0));
+    // srand(time(0));          // should be global in main
     MID = rand();
     protocol = prot;
     normSize = 8.0 / 1000;      // byte -> kbit
@@ -210,6 +209,7 @@ MiddlePoliceBox::MiddlePoliceBox(vector<uint32_t> num, double tStop, ProtocolTyp
     totalRxByte = vector<uint32_t> (nSender, 0);
     totalDrop = vector<uint32_t> (nSender, 0);
     dRate = vector<double> (nSender, 0);
+    lastRx2 = vector<uint32_t>(nSender, 0);
     lastDrop = 0;
     lastRx = 0;
     slr = 0.0;
@@ -250,7 +250,7 @@ MiddlePoliceBox::MiddlePoliceBox(vector<uint32_t> num, double tStop, ProtocolTyp
 
 MiddlePoliceBox::MiddlePoliceBox(const MiddlePoliceBox& mb):
   rwnd(mb.rwnd), cwnd(mb.cwnd), mDrop(mb.mDrop), lDrop(mb.lDrop), totalRx(mb.totalRx), totalRxByte(mb.totalRxByte),
-  totalDrop(mb.totalDrop), lastDrop(mb.lastDrop), lastRx(mb.lastRx), slr(mb.slr), llr(mb.llr), dRate(mb.dRate),
+  totalDrop(mb.totalDrop), lastDrop(mb.lastDrop), lastRx(mb.lastRx), lastRx2(mb.lastRx2), slr(mb.slr), llr(mb.llr), dRate(mb.dRate),
   nSender(mb.nSender), nClient(mb.nClient), nAttacker(mb.nAttacker), nReceiver(mb.nReceiver), slrWnd(mb.slrWnd),
   isEarlyDrop(mb.isEarlyDrop), tStop(mb.tStop), beta(mb.beta), lrTh(mb.lrTh), MID(mb.MID), device(mb.device),
   fnames(mb.fnames), singleNames(mb.singleNames), normSize(mb.normSize), protocol(mb.protocol), isStop(mb.isStop) 
@@ -294,12 +294,12 @@ MiddlePoliceBox::install(Ptr<NetDevice> device)
 void
 MiddlePoliceBox::onMacTx(Ptr<const Packet> p)
 {
-    NS_LOG_FUNCTION(" Begin ... ");
     Ptr<const Packet> pcp = p->Copy();
     MyTag tag;
     if(!pcp->PeekPacketTag(tag)) return;
     int index = tag.GetSimpleValue() - 1;
     rwnd[index] ++;
+    NS_LOG_FUNCTION(" Begin: " + to_string(index));
 
     // best-effort packet handling
     if(isEarlyDrop && rwnd[index] > cwnd[index] && (slr > lrTh || llr[index] > lrTh))
@@ -345,7 +345,6 @@ MiddlePoliceBox::onQueueDrop(Ptr<const QueueDiscItem> qi)
 void
 MiddlePoliceBox::onPktRx(Ptr<const Packet> p)
 {
-    NS_LOG_FUNCTION(" Begin ... ");
     Ptr<const Packet> pcp = p->Copy();
     MyTag tag;
     if(!pcp->PeekPacketTag(tag)) return;
@@ -353,6 +352,7 @@ MiddlePoliceBox::onPktRx(Ptr<const Packet> p)
     totalRx[index] ++;      // for slr update
     double bytes = getPktSizes(pcp, protocol).at(3);     // tcp bytes
     totalRxByte[index] += bytes;
+    NS_LOG_FUNCTION(" Begin: " + to_string(index));
 
     // slr update: should be proper just after updating rx
     bool isUpdate = false;
@@ -444,14 +444,13 @@ MiddlePoliceBox::flowControl(FairType fairness, double interval, double logInter
 void
 MiddlePoliceBox::statistic(double interval)
 {
-    static vector<uint32_t> lastRx2 = vector<uint32_t>(nSender, 0);
+    // static vector<uint32_t> lastRx2 = vector<uint32_t>(nSender, 0);
     if(!isStop) 
         Simulator::Schedule(Seconds(interval), &MiddlePoliceBox::statistic, this, interval);
     NS_LOG_FUNCTION(" Begin, nSender: " + to_string(nSender));
         
     for(uint32_t i = 0; i < nSender; i ++)
     {
-        //debug   
         dRate[i] = (double)(totalRxByte[i] - lastRx2[i]) * normSize / interval;     // record rx data rate
         fout.at(i)[0] << Simulator::Now().GetSeconds() << " " << dRate.at(i) << " kbps" << endl; 
         lastRx2[i] = totalRxByte[i];                                                // record llr
