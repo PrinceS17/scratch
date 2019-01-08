@@ -219,6 +219,11 @@ MiddlePoliceBox::MiddlePoliceBox(vector<uint32_t> num, double tStop, ProtocolTyp
     string folder = "MboxStatistics";
     vector<string> name = {"DataRate", "LLR"};       // open to extension
     vector<string> sname = {"SLR", "QueueSize"};       // for data irrelated to sender 
+    for(uint32_t i = 0; i < 2; i ++)
+    {
+        name[i] += "_" + to_string(MID);
+        sname[i] += "_" + to_string(MID);
+    }
     for(uint32_t i = 0; i < nSender; i ++)
     {
         fnames.push_back(vector<string>());
@@ -292,6 +297,45 @@ MiddlePoliceBox::install(Ptr<NetDevice> device)
 }
 
 void
+MiddlePoliceBox::install(NetDeviceContainer nc)
+{
+    macRxDev = vector<Ptr<PointToPointNetDevice> >(nc.GetN());
+    for(uint32_t i = 0; i < nc.GetN(); i ++)
+        macRxDev.at(i) = DynamicCast<PointToPointNetDevice> (nc.Get(i));
+}
+
+// for test/debug only
+void MiddlePoliceBox::txSink(Ptr<const Packet> p)
+{
+    // for debug only
+    static vector<uint32_t> cnt = {0,0,0,0};
+
+    Ptr<const Packet> pcp = p->Copy();
+    MyTag tag;
+    if(!pcp->PeekPacketTag(tag)) return;
+    int index = tag.GetSimpleValue() - 1;
+    cnt[index] ++;
+    double bytes = getPktSizes(pcp, UDP).at(3);
+    NS_LOG_FUNCTION(" Begin: " + to_string(index));
+    
+    stringstream ss;
+    ss << "MacTx: No. " << index << ", " << cnt[index];
+    NS_LOG_FUNCTION(ss.str());
+}
+
+// for test/debug only
+void MiddlePoliceBox::rxDrop(Ptr<const Packet> p)
+{
+    Ptr<const Packet> pcp = p->Copy();
+    MyTag tag;
+    if(!pcp->PeekPacketTag(tag)) return;
+    int index = tag.GetSimpleValue() - 1;
+    double bytes = getPktSizes(pcp, UDP).at(3);
+    NS_LOG_FUNCTION(" Begin: " + to_string(index));
+    
+}
+
+void
 MiddlePoliceBox::onMacTx(Ptr<const Packet> p)
 {
     Ptr<const Packet> pcp = p->Copy();
@@ -306,6 +350,28 @@ MiddlePoliceBox::onMacTx(Ptr<const Packet> p)
     {
 
         device->SetEarlyDrop(true);
+        mDrop[index] ++;
+    }
+
+    // only for debug
+    NS_LOG_FUNCTION(" rwnd[" + to_string(index) + "] = " + to_string(rwnd[index]));
+}
+
+void
+MiddlePoliceBox::onMacRx(Ptr<const Packet> p)
+{
+    Ptr<const Packet> pcp = p->Copy();
+    MyTag tag;
+    if(!pcp->PeekPacketTag(tag)) return;
+    int index = tag.GetSimpleValue() - 1;
+    rwnd[index] ++;
+    NS_LOG_FUNCTION(" Begin: " + to_string(index));
+
+    // best-effort packet handling
+    if(isEarlyDrop && rwnd[index] > cwnd[index] && (slr > lrTh || llr[index] > lrTh))
+    {
+        // device->SetEarlyDrop(true);
+        macRxDev.at(index)->SetEarlyDrop(true);
         mDrop[index] ++;
     }
 
@@ -334,6 +400,7 @@ MiddlePoliceBox::onQueueDrop(Ptr<const QueueDiscItem> qi)
     MyTag tag;
     if(!pcp->PeekPacketTag(tag)) return;
     int index = tag.GetSimpleValue() - 1;
+    // rwnd[index] ++;          // compensate for the dropped packet not count in MacTx, should be delete if later mbox is before tc layer
     lDrop[index] ++;
     totalDrop[index] ++;    // for slr
 
@@ -352,7 +419,9 @@ MiddlePoliceBox::onPktRx(Ptr<const Packet> p)
     totalRx[index] ++;      // for slr update
     double bytes = getPktSizes(pcp, protocol).at(3);     // tcp bytes
     totalRxByte[index] += bytes;
-    NS_LOG_FUNCTION(" Begin: " + to_string(index));
+    NS_LOG_FUNCTION(" Begin: " + to_string(index) + ".");
+    //only for debug
+    NS_LOG_FUNCTION("pkt rx bytes: " + to_string(bytes) + " B");
 
     // slr update: should be proper just after updating rx
     bool isUpdate = false;
@@ -372,7 +441,7 @@ MiddlePoliceBox::onPktRx(Ptr<const Packet> p)
     // NS_LOG_FUNCTION(ss.str());
     if(isUpdate)
     {
-        ss << "  # RX update: " << lastRx << ", # link drop update: " << lastDrop << endl;
+        ss << "  # RX update: " << lastRx << ", # link drop update: " << lastDrop << "; " << bytes << "B";
         NS_LOG_FUNCTION(ss.str());
         isUpdate = false;
     }
@@ -384,7 +453,7 @@ MiddlePoliceBox::clear()
     for(uint32_t i = 0; i < nSender; i ++)
     {
         rwnd[i] = 0;
-        cwnd[i] = 0;
+        // cwnd[i] = 0;
         lDrop[i] = 0;
         mDrop[i] = 0;
     }
@@ -405,9 +474,9 @@ MiddlePoliceBox::flowControl(FairType fairness, double interval, double logInter
     double capacity = 0;
     for(uint32_t i = 0; i < nSender; i ++)
     {
-        double lossRate = rwnd[i] > 0? (double) (lDrop[i] + mDrop[i])/rwnd[i] : 0.0;
+        // double lossRate = rwnd[i] > 0? (double) (lDrop[i] + mDrop[i])/rwnd[i] : 0.0;
         // debug only: what if only count link drop into llr?
-        // double lossRate = rwnd[i] > 0? (double) lDrop[i] / rwnd[i] : 0.0;
+        double lossRate = rwnd[i] > 0? (double) lDrop[i] / rwnd[i] : 0.0;
 
         llr[i] = rwnd[i] > 5? (1 - beta) * lossRate + beta * llr[i] : beta * llr[i];
         double tmp = rwnd[i] - lDrop[i] - mDrop[i]; 
@@ -431,7 +500,7 @@ MiddlePoliceBox::flowControl(FairType fairness, double interval, double logInter
 
     // only for debug
     stringstream ss;
-    ss << "\n                capacity: " << capacity << "; slr: " << slr << endl;
+    ss << "\n                MID: " << MID << "; capacity: " << capacity << "; slr: " << slr << endl;
     ss << "flow control:   No.  rwnd   cwnd   mdrop  ldrop  llr" << endl;
     for (uint32_t i = 0; i < nSender; i ++)
         ss << "                " << i << "    " << rwnd[i] << "    " << cwnd[i] << "    " << mDrop[i]
@@ -463,7 +532,7 @@ MiddlePoliceBox::statistic(double interval)
 
     // only for debug
     stringstream ss;
-    ss << "\nstatistics:     No.  rate(kbps)  LLR" << endl;
+    ss << "                MID: " << MID << "\nstatistics:     No.  rate(kbps)  LLR" << endl;
     for(uint32_t i = 0; i < nSender; i ++)
         ss << "                " << i << "    " << dRate.at(i) << "    " << llr.at(i) << endl;
     NS_LOG_INFO(ss.str());

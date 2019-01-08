@@ -93,6 +93,12 @@ public:
      */
     void install(Ptr<NetDevice> device);
     /**
+     * \brief Install the mbox with tx router's rx side to set early drop at MacRx.
+     * 
+     * \param nc The rx net devices of the tx router.
+     */
+    void install(NetDeviceContainer nc);
+    /**
      * \brief This method is called when a packet arrives and is ready to send.
      * In this method, receive window of mbox will be updated and it will set
      * early drop according to the loss rate.
@@ -100,7 +106,18 @@ public:
      * 
      * \param packet The packet arrived.
      */
+    void txSink(Ptr<const Packet> p);   // !< for debug only
+    void rxDrop(Ptr<const Packet> p);   // !< for debug only
     void onMacTx(Ptr<const Packet> p);
+    /**
+     * \brief This method is called when a packet arrives from all channels.
+     * In this method, receive window of mbox will be updated and it will set
+     * early drop according to the loss rate.
+     * NOTE: no need for onMacTxDrop since mDrop is updated here.
+     * 
+     * \param packet The packet arrived.
+     */
+    void onMacRx(Ptr<const Packet> p);
     /**
      * \brief Called similar to mac tx except the mbox is paused and thus doesn't drop 
      * packet to control the flow.
@@ -179,6 +196,7 @@ private:    // values can/should be known locally inside mbox
     // internal parameters
     int MID;                            // mbox ID
     Ptr<PointToPointNetDevice> device;  // where mbox is installed
+    vector< Ptr<PointToPointNetDevice> > macRxDev;     // to set early drop before queue drop
     vector< vector<string> > fnames;    // for statistics
     vector< string> singleNames;
     vector< vector<ofstream> > fout;    // for statistics: output data to file

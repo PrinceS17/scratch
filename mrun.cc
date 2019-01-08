@@ -185,9 +185,6 @@ void RunningModule::buildTopology(vector<Group> grp)
     {
         SetNode(dv.at(i).GetLeft(), 2, i, 0);
         SetNode(dv.at(i).GetRight(), 2, i, 1);
-        // debug only
-        // cout << "# interfaces: "<< GetNode(i, grp[i].routerId[0])->GetObject<Ipv4>()->GetNInterfaces() << endl;
-    
         for(uint32_t j = 0; j < grp.at(i).txId.size(); j ++)
             SetNode(dv.at(i).GetLeft(j), 0, i, j);
         for(uint32_t j = 0; j < grp.at(i).rxId.size(); j ++)
@@ -380,21 +377,29 @@ void RunningModule::connectMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> g
     {
         // MiddlePoliceBox& mb = mboxes.at(i);         // not sure
         Ptr<NetDevice> txRouter = GetRouter(i, true)->GetDevice(0);
-        Ptr<NetDevice> rxRouter = GetRouter(i, false)->GetDevice(0);        
+        Ptr<NetDevice> rxRouter = GetRouter(i, false)->GetDevice(0);
+        Ptr<Node> txNode = GetRouter(i, true);        
         // Ptr<NetDevice> txRouter = router.Get(2*i)->GetDevice(0);
         // Ptr<NetDevice> rxRouter = router.Get(2*i + 1)->GetDevice(0);
-
-        // for debug only
-        cout << i << " : TX Mtu: " << txRouter->GetMtu() << "; RX Mtu: " << rxRouter->GetMtu() << endl;  
+        NetDeviceContainer nc;
+        for(uint32_t j = 1; j < txNode->GetNDevices(); j ++)
+            nc.Add(txNode->GetDevice(j));               // add rx side devices
 
         // install mbox
-        mboxes.at(i).install(txRouter);
+        mboxes.at(i).install(nc);                       // install probes for all tx router's mac rx side
         NS_LOG_FUNCTION("Mbox installed on router " + to_string(i));
 
         // tracing
-        txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mboxes.at(i)));
+        txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::txSink, &mboxes.at(i)));
         rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes.at(i)));
-        qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));        
+        qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
+
+        for(uint j = 0; j < txNode->GetNDevices(); j ++)
+        {
+            txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
+            // just for debug: happens when 1. mdrop; 2. error
+            // txNode->GetDevice(j)->TraceConnectWithoutContext("PhyRxDrop", MakeCallback(&MiddlePoliceBox::rxDrop, &mboxes.at(i)));
+        }        
   
         // flow control
         mboxes.at(i).flowControl(PERSENDER, interval, logInterval);
@@ -466,11 +471,12 @@ int main ()
     // set start and stop time
     vector<double> t(2);
     t[0] = 0.0;
-    t[1] = 5.0;
+    t[1] = 60.0;
     srand(time(0));
 
     // define bottleneck link bandwidth and delay
     vector<string> bnBw{"80kbps", "160kbps"};
+    // vector<string> bnBw{"160kbps"};
     vector<string> bnDelay{"2ms", "2ms"};
     ProtocolType pt = TCP;
 
@@ -484,11 +490,11 @@ int main ()
     g1.insertLink({10, 11}, {2, 3});
 
     vector<uint32_t> rtid2 = {26, 50};
-    map<uint32_t, string> tx2rate2 = {{10, "1Mbps"}, {12, "2Mbps"}};
-    vector<uint32_t> rxId2 = {2,4};
+    map<uint32_t, string> tx2rate2 = {{9, "1Mbps"}, {12, "2Mbps"}};
+    vector<uint32_t> rxId2 = {1,4};
     map<string, uint32_t> rate2port2 = {{"1Mbps", 80}, {"2Mbps", 90}};
     Group g2(rtid2, tx2rate2, rxId2, rate2port2);
-    g2.insertLink({10, 12}, {2, 4});
+    g2.insertLink({9, 12}, {1, 4});
     vector<Group> grps({g1, g2});
 
     // running module construction

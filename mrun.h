@@ -17,7 +17,8 @@
 #ifndef MRUN_H
 #define MRUN_H
 
-#include "ns3/mbox.h"
+// #include "ns3/mbox.h"
+#include "ns3/mbox-module.h"
 
 using namespace std;
 using namespace ns3;
@@ -75,7 +76,7 @@ public:
     /* links: txs[i] -> rxs[i] */
     void insertLink(vector<uint32_t> txs, vector<uint32_t> rxs)
     {
-        for(int i = 0; i < txs.size(); i ++)
+        for(uint32_t i = 0; i < txs.size(); i ++)
             insertLink(txs.at(i), rxs.at(i));
     }
 
@@ -132,7 +133,7 @@ public:
      * \param delay Delay of the links. (to be determined)
      * \param Th In format [MinTh, MaxTh].
      */ 
-    void configure(double stopTime, ProtocolType pt, vector<string> bw, vector<string> delay, vector<MiddlePoliceBox> mboxes, vector<double> Th=vector<double>());
+    void configure(double stopTime, ProtocolType pt, vector<string> bw, vector<string> delay, vector<MiddlePoliceBox>& mboxes, vector<double> Th=vector<double>());
     /**
      * \brief Set queue (RED by default, may need other function for other queue) and return 
      * a queue disc container for tracing the packet drop by RED queue. Later assign Ipv4 
@@ -189,28 +190,28 @@ public:
      * \param interval Interval of mbox's detection.
      * \param logInterval Interval of mbox's logging for e.g. data rate, llr, slr.
      */
-    void connectMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp, double interval, double logInterval);
+    void connectMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp, double interval, double logInterval);
     /**
      * \brief Stop the installed mboxes and disconnect the tracing.
      * 
      * \param mboxes Mboxes that installed on the routers.
      * \param grp Node group with rate level.
      */
-    void disconnectMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp);
+    void disconnectMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp);
     /**
      * \brief Pause the mbox, i.e. stop control (early drop) but continue detecting packets.
      * 
      * \param mboxes Mboxes that installed on the routers.
      * \param grp Node group with rate level.
      */
-    void pauseMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp);
+    void pauseMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp);
     /**
      * \brief Resume the mbox, i.e. continue to both detect and drop the packets.
      * 
      * \param mboxes Mboxes that installed on the routers.
      * \param grp Node group with rate level.
      */
-    void resumeMbox(vector<MiddlePoliceBox> mboxes, vector<Group> grp);
+    void resumeMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp);
     /**
      * \brief Start all the application from Now() and also start the mbox detection by tracing.
      */
@@ -245,6 +246,8 @@ public:
      * \param id Node id in group g.
      */
     Ptr<Node> GetNode(uint32_t i, uint32_t id);
+
+    Ptr<Node> GetRouter(uint32_t i, bool ifTx);
     /**
      * \brief Get ipv4 address for socket destination setting.
      * 
@@ -252,6 +255,7 @@ public:
      * \param id Node id in group g. 
      */
     Ipv4Address GetIpv4Addr(uint32_t i, uint32_t id);
+    void txSink(Ptr<const Packet> p);   // !< for test and debug
     
 public:         // network entity
     NodeContainer nodes;        // all nodes in the topology
@@ -263,6 +267,8 @@ public:         // network entity
     Ipv4InterfaceContainer ifc;     // ipv4 interface container for flow destination specification
     ApplicationContainer sinkApp;   // sink app
     vector< Ptr<MyApp> > senderApp;   // sender app: need testing!
+
+    vector<PointToPointDumbbellHelper> dv;  // use to preserve channel information
 
 private:        // parameters
     // basic
