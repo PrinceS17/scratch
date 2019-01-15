@@ -208,6 +208,7 @@ void RunningModule::buildTopology(vector<Group> grp)
 void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> bw, vector<string> delay, vector<MiddlePoliceBox>& mboxes, vector<double> Th)
 {
     NS_LOG_FUNCTION("Begin.");
+    NS_LOG_INFO("Starting running module ... ");
     protocol = pt;
     bottleneckBw = bw;
     bottleneckDelay = delay;
@@ -215,11 +216,10 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     ifc = setAddress();
     sinkApp = setSink(groups, protocol);
     senderApp = setSender(groups, protocol);
-    connectMbox(mboxes, groups, 1.0, 1.0);      // manually set here 
-
-    NS_LOG_INFO("Starting running module ... ");
-    // start();
-
+    // this->mboxes = mboxes;
+    for(uint32_t i = 0; i < mboxes.size(); i ++)
+        this->mboxes.push_back(mboxes.at(i));
+    connectMbox(groups, 1.0, 1.0);      // manually set here 
 }
 
 QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
@@ -371,9 +371,9 @@ Ptr<MyApp> RunningModule::netFlow(uint32_t i, uint32_t tId, uint32_t rId, uint32
     return app;
 }
 
-void RunningModule::connectMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp, double interval, double logInterval)
+void RunningModule::connectMbox(vector<Group> grp, double interval, double logInterval)
 {
-    NS_LOG_FUNCTION("Begin.");
+    NS_LOG_FUNCTION("Connect Mbox ... ");
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
         // MiddlePoliceBox& mb = mboxes.at(i);         // not sure
@@ -389,30 +389,29 @@ void RunningModule::connectMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> g
         // install mbox
         mboxes.at(i).install(nc);                       // install probes for all tx router's mac rx side
         NS_LOG_FUNCTION("Mbox installed on router " + to_string(i));
-
+        
+        // start mbox
+        mboxes.at(i).start();
+        
         // tracing
         for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
-            if(!txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i))))
-                NS_LOG_INFO("Failed to connect onMacRx! index: " + to_string(j));
+            txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
         rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes.at(i)));
         qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
 
         // flow control
         mboxes.at(i).flowControl(PERSENDER, interval, logInterval);
+
     }
 }
 
-void RunningModule::disconnectMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp)
+void RunningModule::disconnectMbox(vector<Group> grp)
 {
     // for debug only
-    NS_LOG_INFO("Disconnect Mbox...");
+    NS_LOG_INFO("Disconnect Mbox ... ");
 
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
-        // for debug only
-        NS_LOG_INFO("    i = " + to_string(i));
-
-        // MiddlePoliceBox mb(mboxes.at(i));
         Ptr<NetDevice> txRouter = GetRouter(i, true)->GetDevice(0);
         Ptr<NetDevice> rxRouter = GetRouter(i, false)->GetDevice(0);
         Ptr<Node> txNode = GetRouter(i, true);
@@ -421,8 +420,7 @@ void RunningModule::disconnectMbox(vector<MiddlePoliceBox>& mboxes, vector<Group
         mboxes.at(i).stop();     // stop flow control and logging 
         
         for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
-            if(!txNode->GetDevice(j)->TraceDisconnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i))))
-                NS_LOG_INFO("Failed to disconnect onMacRx! index: " + to_string(j));
+            txNode->GetDevice(j)->TraceDisconnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
         if(!rxRouter->TraceDisconnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes[i])))
             NS_LOG_INFO("Failed to disconnect onPktRx!");
         if(!qc.Get(i)->TraceDisconnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i))))
@@ -432,8 +430,9 @@ void RunningModule::disconnectMbox(vector<MiddlePoliceBox>& mboxes, vector<Group
     }
 }    
 
-void RunningModule::pauseMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp)
+void RunningModule::pauseMbox(vector<Group> grp)
 {
+    NS_LOG_INFO("Pause Mbox: stop early drop ... ");
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
         Ptr<Node> txNode = GetRouter(i, true);
@@ -447,8 +446,9 @@ void RunningModule::pauseMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp
     }
 }
 
-void RunningModule::resumeMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp)
+void RunningModule::resumeMbox(vector<Group> grp)
 {
+    NS_LOG_INFO("Resume Mbox: restart early drop ... ");    
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
         Ptr<Node> txNode = GetRouter(i, true);
@@ -487,23 +487,23 @@ int main ()
     // set start and stop time
     vector<double> t(2);
     t[0] = 0.0;
-    t[1] = 23.0;
+    t[1] = 25.0;
     srand(time(0));
 
     // define bottleneck link bandwidth and delay
-    // vector<string> bnBw{"80kbps", "160kbps"};
-    vector<string> bnBw{"160kbps"};
+    vector<string> bnBw{"80kbps", "160kbps"};
+    // vector<string> bnBw{"160kbps"};
     vector<string> bnDelay{"2ms", "2ms"};
     ProtocolType pt = UDP;
 
     // generating groups
     cout << "Generating groups of nodes ... " << endl;
-    // vector<uint32_t> rtid = {25, 49};
-    // map<uint32_t, string> tx2rate1 = {{10, "1Mbps"}, {11, "2Mbps"}};
-    // vector<uint32_t> rxId1 = {2,3};
-    // map<string, uint32_t> rate2port1 = {{"1Mbps", 80}, {"2Mbps", 90}};
-    // Group g1(rtid, tx2rate1, rxId1, rate2port1);
-    // g1.insertLink({10, 11}, {2, 3});
+    vector<uint32_t> rtid = {25, 49};
+    map<uint32_t, string> tx2rate1 = {{10, "1Mbps"}, {11, "2Mbps"}};
+    vector<uint32_t> rxId1 = {2,3};
+    map<string, uint32_t> rate2port1 = {{"1Mbps", 80}, {"2Mbps", 90}};
+    Group g1(rtid, tx2rate1, rxId1, rate2port1);
+    g1.insertLink({10, 11}, {2, 3});
 
     vector<uint32_t> rtid2 = {26, 50};
     map<uint32_t, string> tx2rate2 = {{9, "1Mbps"}, {12, "2Mbps"}};
@@ -523,6 +523,7 @@ int main ()
  
     // for copy constructor test only
     cout << "Is MiddlePoliceBox move_constructible? " << is_move_constructible<MiddlePoliceBox>::value << endl;
+    cout << "Is MiddlePoliceBox move assignable? " << is_move_assignable<MiddlePoliceBox>::value << endl;
     cout << "Is MiddlePoliceBox default_constructible? " << is_default_constructible<MiddlePoliceBox>::value << endl;
     cout << "Is MiddlePoliceBox copy_constructible? " << is_copy_constructible<MiddlePoliceBox>::value << endl;
 
@@ -531,14 +532,19 @@ int main ()
     MiddlePoliceBox mbox(vector<uint32_t>{2,2,1,1}, t[1], pt, 0.9);  
     MiddlePoliceBox mbox2(vector<uint32_t>{2,2,1,1}, t[1], pt, 0.9);    
         // limitation: mbox could only process 2 rate level!
-    // vector<MiddlePoliceBox> mboxes({mbox, mbox2});
-    vector<MiddlePoliceBox> mboxes({mbox});
-    // mboxes.push_back(mbox);    
+    vector<MiddlePoliceBox> mboxes({mbox, mbox2});
+    // vector<MiddlePoliceBox> mboxes({mbox});
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
 
+
+    // code with no use
+    // Ptr<MiddlePoliceBox> pm = &mbox;
+
     // test pause, resume and disconnect mbox
-    Simulator::Schedule(Seconds(4.1), &RunningModule::disconnectMbox, &rm, mboxes, grps);
-    // Simulator::Schedule(Seconds(20.1), &RunningModule::connectMbox, &rm, mboxes, grps, 1.0, 1.0);
+    Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
+    Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
+    Simulator::Schedule(Seconds(11.1), &RunningModule::pauseMbox, &rm, grps);
+    Simulator::Schedule(Seconds(14.1), &RunningModule::resumeMbox, &rm, grps);
 
 
     // flow monitor
