@@ -400,7 +400,7 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
 
         // flow control
-        mboxes.at(i).flowControl(PERSENDER, interval, logInterval);
+        mboxes.at(i).flowControl(mboxes.at(i).GetFairness(), interval, logInterval);
 
     }
 }
@@ -487,31 +487,49 @@ int main ()
     // set start and stop time
     vector<double> t(2);
     t[0] = 0.0;
-    t[1] = 25.0;
+    t[1] = 200.0;
     srand(time(0));
 
-    // define bottleneck link bandwidth and delay
-    vector<string> bnBw{"80kbps", "160kbps"};
-    // vector<string> bnBw{"160kbps"};
+    // define bottleneck link bandwidth and delay, protocol, fairness
+    vector<string> bnBw{"1Mbps", "1Mbps"};
+    // vector<string> bnBw{"1Mbps"};
     vector<string> bnDelay{"2ms", "2ms"};
     ProtocolType pt = UDP;
+    FairType fairness = PERSENDER;
+
+    // for copy constructor test only
+    cout << "Is MiddlePoliceBox move_constructible? " << is_move_constructible<MiddlePoliceBox>::value << endl;
+    cout << "Is MiddlePoliceBox move assignable? " << is_move_assignable<MiddlePoliceBox>::value << endl;
+    cout << "Is MiddlePoliceBox default_constructible? " << is_default_constructible<MiddlePoliceBox>::value << endl;
+    cout << "Is MiddlePoliceBox copy_constructible? " << is_copy_constructible<MiddlePoliceBox>::value << endl;
 
     // generating groups
     cout << "Generating groups of nodes ... " << endl;
+    
+    // group: 2*2, 1
+    // vector<uint32_t> rtid = {5, 6};
+    // map<uint32_t, string> tx2rate1 = {{1, "2Mbps"}, {2, "2Mbps"}, {3, "4Mbps"}, {4, "4Mbps"}};
+    // vector<uint32_t> rxId1 = {7, 8, 9, 10};
+    // map<string, uint32_t> rate2port1 = {{"2Mbps", 80}, {"4Mbps", 90}};
+    // Group g1(rtid, tx2rate1, rxId1, rate2port1);
+    // g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
+
+    // group: 3, 2
+    cout << "Generating groups of nodes ... " << endl;
     vector<uint32_t> rtid = {25, 49};
-    map<uint32_t, string> tx2rate1 = {{10, "1Mbps"}, {11, "2Mbps"}};
+    map<uint32_t, string> tx2rate1 = {{10, "2Mbps"}, {11, "4Mbps"}};
     vector<uint32_t> rxId1 = {2,3};
-    map<string, uint32_t> rate2port1 = {{"1Mbps", 80}, {"2Mbps", 90}};
+    map<string, uint32_t> rate2port1 = {{"2Mbps", 80}, {"4Mbps", 90}};
     Group g1(rtid, tx2rate1, rxId1, rate2port1);
     g1.insertLink({10, 11}, {2, 3});
 
     vector<uint32_t> rtid2 = {26, 50};
-    map<uint32_t, string> tx2rate2 = {{9, "1Mbps"}, {12, "2Mbps"}};
-    vector<uint32_t> rxId2 = {1,4};
-    map<string, uint32_t> rate2port2 = {{"1Mbps", 80}, {"2Mbps", 90}};
+    map<uint32_t, string> tx2rate2 = {{10, "2Mbps"}, {12, "4Mbps"}};
+    vector<uint32_t> rxId2 = {2,4};
+    map<string, uint32_t> rate2port2 = {{"2Mbps", 80}, {"4Mbps", 90}};
     Group g2(rtid2, tx2rate2, rxId2, rate2port2);
-    g2.insertLink({9, 12}, {1, 4});
-    vector<Group> grps({g2});
+    g2.insertLink({10, 12}, {2, 4});
+    vector<Group> grps({g1, g2});
 
     // running module construction
     LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
@@ -520,32 +538,21 @@ int main ()
     RunningModule rm(t, grps, pt, bnBw, bnDelay, "2ms", 1000);
     cout << "Building topology ... " << endl;
     rm.buildTopology(grps);
- 
-    // for copy constructor test only
-    cout << "Is MiddlePoliceBox move_constructible? " << is_move_constructible<MiddlePoliceBox>::value << endl;
-    cout << "Is MiddlePoliceBox move assignable? " << is_move_assignable<MiddlePoliceBox>::value << endl;
-    cout << "Is MiddlePoliceBox default_constructible? " << is_default_constructible<MiddlePoliceBox>::value << endl;
-    cout << "Is MiddlePoliceBox copy_constructible? " << is_copy_constructible<MiddlePoliceBox>::value << endl;
 
     // mbox construction
     cout << "Configuring ... " << endl;    
-    MiddlePoliceBox mbox(vector<uint32_t>{2,2,1,1}, t[1], pt, 0.9);  
-    MiddlePoliceBox mbox2(vector<uint32_t>{2,2,1,1}, t[1], pt, 0.9);    
+    MiddlePoliceBox mbox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness);         // vector{nSender, nReceiver, nClient, nAttacker}
+    MiddlePoliceBox mbox2(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness);    
         // limitation: mbox could only process 2 rate level!
     vector<MiddlePoliceBox> mboxes({mbox, mbox2});
     // vector<MiddlePoliceBox> mboxes({mbox});
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
 
-
-    // code with no use
-    // Ptr<MiddlePoliceBox> pm = &mbox;
-
-    // test pause, resume and disconnect mbox
-    Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
-    Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
-    Simulator::Schedule(Seconds(11.1), &RunningModule::pauseMbox, &rm, grps);
-    Simulator::Schedule(Seconds(14.1), &RunningModule::resumeMbox, &rm, grps);
-
+    // // test pause, resume and disconnect mbox
+    // Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
+    // Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
+    // Simulator::Schedule(Seconds(11.1), &RunningModule::pauseMbox, &rm, grps);
+    // Simulator::Schedule(Seconds(14.1), &RunningModule::resumeMbox, &rm, grps);
 
     // flow monitor
     Ptr<FlowMonitor> flowmon;
