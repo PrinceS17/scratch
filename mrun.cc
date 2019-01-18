@@ -117,7 +117,7 @@ Ipv4Address RunningModule::GetIpv4Addr(uint32_t i, uint32_t id)     // counting 
     return ifc.GetAddress(sender.GetN() + receiver.GetN() + i*2 + (uint32_t)(j - g.routerId.begin()));
 }
 
-RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, uint32_t size)
+RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, bool trackPkt, uint32_t size)
 {
     // constant setting
     nSender = 0;
@@ -135,6 +135,7 @@ RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType p
     bottleneckBw = bnBw;
     bottleneckDelay = bnDelay;
     this->delay = delay;
+    isTrackPkt = trackPkt;
 
 }
 
@@ -360,6 +361,7 @@ Ptr<MyApp> RunningModule::netFlow(uint32_t i, uint32_t tId, uint32_t rId, uint32
     Address sinkAddr(InetSocketAddress(dv.at(i).GetRightIpv4Address(ri), port));
     
     Ptr<MyApp> app = CreateObject<MyApp> ();
+    app->isTrackPkt = isTrackPkt;
     app->SetTagValue(tag);
     app->Setup(skt, sinkAddr, pktSize, rate);
     GetNode(i, tId)->AddApplication(app);
@@ -510,6 +512,7 @@ int main ()
     vector<string> bnDelay{"2ms", "2ms"};
     ProtocolType pt = UDP;
     FairType fairness = PERSENDER;
+    bool isTrackPkt = false;
 
     // for copy constructor test only
     cout << "Is MiddlePoliceBox move_constructible? " << is_move_constructible<MiddlePoliceBox>::value << endl;
@@ -558,13 +561,13 @@ int main ()
     LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
     LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);
     cout << "Initializing running module..." << endl;
-    RunningModule rm(t, grps, pt, bnBw, bnDelay, "2ms", 1000);
+    RunningModule rm(t, grps, pt, bnBw, bnDelay, "2ms", isTrackPkt, 1000);
     cout << "Building topology ... " << endl;
     rm.buildTopology(grps);
 
     // mbox construction
     cout << "Configuring ... " << endl;
-    MiddlePoliceBox mbox(vector<uint32_t>{4,4,1,3}, t[1], pt, fairness);         // vector{nSender, nReceiver, nClient, nAttacker}
+    MiddlePoliceBox mbox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, isTrackPkt);         // vector{nSender, nReceiver, nClient, nAttacker}
     // MiddlePoliceBox mbox2(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness);    
         // limitation: mbox could only process 2 rate level!
     // vector<MiddlePoliceBox> mboxes({mbox, mbox2});
