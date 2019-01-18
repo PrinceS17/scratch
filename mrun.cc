@@ -399,8 +399,22 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes.at(i)));
         qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
 
+        // reduntant: for debug only
+        txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mboxes.at(i)));
+        txRouter->TraceConnectWithoutContext("MacTxDrop", MakeCallback(&MiddlePoliceBox::onMacTxDrop, &mboxes.at(i)));
+        txRouter->TraceConnectWithoutContext("PhyTxDrop", MakeCallback(&MiddlePoliceBox::onPhyTxDrop, &mboxes.at(i)));
+        for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
+            txNode->GetDevice(j)->TraceConnectWithoutContext("PhyRxDrop", MakeCallback(&MiddlePoliceBox::onPhyRxDrop, &mboxes.at(i)));
+        
+
+
         // flow control
         mboxes.at(i).flowControl(mboxes.at(i).GetFairness(), interval, logInterval);
+        
+        // for test only
+        stringstream ss;
+        ss << "Queue size: " << qc.Get(i)->GetNPackets();
+        NS_LOG_INFO(ss.str());
 
     }
 }
@@ -487,12 +501,12 @@ int main ()
     // set start and stop time
     vector<double> t(2);
     t[0] = 0.0;
-    t[1] = 200.0;
+    t[1] = 25.0;
     srand(time(0));
 
     // define bottleneck link bandwidth and delay, protocol, fairness
-    vector<string> bnBw{"1Mbps", "1Mbps"};
-    // vector<string> bnBw{"1Mbps"};
+    // vector<string> bnBw{"1Mbps", "1Mbps"};
+    vector<string> bnBw{"10Mbps"};
     vector<string> bnDelay{"2ms", "2ms"};
     ProtocolType pt = UDP;
     FairType fairness = PERSENDER;
@@ -506,30 +520,39 @@ int main ()
     // generating groups
     cout << "Generating groups of nodes ... " << endl;
     
-    // group: 2*2, 1
+    // group: 2*1, 1
     // vector<uint32_t> rtid = {5, 6};
-    // map<uint32_t, string> tx2rate1 = {{1, "2Mbps"}, {2, "2Mbps"}, {3, "4Mbps"}, {4, "4Mbps"}};
-    // vector<uint32_t> rxId1 = {7, 8, 9, 10};
+    // map<uint32_t, string> tx2rate1 = {{1, "2Mbps"}, {2, "4Mbps"}};
+    // vector<uint32_t> rxId1 = {7, 8};
     // map<string, uint32_t> rate2port1 = {{"2Mbps", 80}, {"4Mbps", 90}};
     // Group g1(rtid, tx2rate1, rxId1, rate2port1);
-    // g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
+    // g1.insertLink({1, 2}, {7, 8});
+
+    // // group: 2*2, 1
+    vector<uint32_t> rtid = {5, 6};
+    map<uint32_t, string> tx2rate1 = {{1, "20Mbps"}, {2, "20Mbps"}, {3, "40Mbps"}, {4, "40Mbps"}};
+    vector<uint32_t> rxId1 = {7, 8, 9, 10};
+    map<string, uint32_t> rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
+    Group g1(rtid, tx2rate1, rxId1, rate2port1);
+    g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
 
     // group: 3, 2
-    cout << "Generating groups of nodes ... " << endl;
-    vector<uint32_t> rtid = {25, 49};
-    map<uint32_t, string> tx2rate1 = {{10, "2Mbps"}, {11, "4Mbps"}};
-    vector<uint32_t> rxId1 = {2,3};
-    map<string, uint32_t> rate2port1 = {{"2Mbps", 80}, {"4Mbps", 90}};
-    Group g1(rtid, tx2rate1, rxId1, rate2port1);
-    g1.insertLink({10, 11}, {2, 3});
+    // cout << "Generating groups of nodes ... " << endl;
+    // vector<uint32_t> rtid = {25, 49};
+    // map<uint32_t, string> tx2rate1 = {{10, "2Mbps"}, {11, "4Mbps"}};
+    // vector<uint32_t> rxId1 = {2,3};
+    // map<string, uint32_t> rate2port1 = {{"2Mbps", 80}, {"4Mbps", 90}};
+    // Group g1(rtid, tx2rate1, rxId1, rate2port1);
+    // g1.insertLink({10, 11}, {2, 3});
 
-    vector<uint32_t> rtid2 = {26, 50};
-    map<uint32_t, string> tx2rate2 = {{10, "2Mbps"}, {12, "4Mbps"}};
-    vector<uint32_t> rxId2 = {2,4};
-    map<string, uint32_t> rate2port2 = {{"2Mbps", 80}, {"4Mbps", 90}};
-    Group g2(rtid2, tx2rate2, rxId2, rate2port2);
-    g2.insertLink({10, 12}, {2, 4});
-    vector<Group> grps({g1, g2});
+    // vector<uint32_t> rtid2 = {26, 50};
+    // map<uint32_t, string> tx2rate2 = {{10, "2Mbps"}, {12, "4Mbps"}};
+    // vector<uint32_t> rxId2 = {2,4};
+    // map<string, uint32_t> rate2port2 = {{"2Mbps", 80}, {"4Mbps", 90}};
+    // Group g2(rtid2, tx2rate2, rxId2, rate2port2);
+    // g2.insertLink({10, 12}, {2, 4});
+
+    vector<Group> grps({g1});
 
     // running module construction
     LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
@@ -540,12 +563,12 @@ int main ()
     rm.buildTopology(grps);
 
     // mbox construction
-    cout << "Configuring ... " << endl;    
-    MiddlePoliceBox mbox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness);         // vector{nSender, nReceiver, nClient, nAttacker}
-    MiddlePoliceBox mbox2(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness);    
+    cout << "Configuring ... " << endl;
+    MiddlePoliceBox mbox(vector<uint32_t>{4,4,1,3}, t[1], pt, fairness);         // vector{nSender, nReceiver, nClient, nAttacker}
+    // MiddlePoliceBox mbox2(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness);    
         // limitation: mbox could only process 2 rate level!
-    vector<MiddlePoliceBox> mboxes({mbox, mbox2});
-    // vector<MiddlePoliceBox> mboxes({mbox});
+    // vector<MiddlePoliceBox> mboxes({mbox, mbox2});
+    vector<MiddlePoliceBox> mboxes({mbox});
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
 
     // // test pause, resume and disconnect mbox

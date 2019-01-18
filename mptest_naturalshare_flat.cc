@@ -360,22 +360,11 @@ MyApp::SendPacket (void)
   // 2nd: add for tag for m_tagValue
   // tag.SetSimpleValue(m_tagValue);
   tag.SetSimpleValue (m_tagValue * tagScale + m_cnt);
-  rtt[m_tagValue][m_cnt++] = Simulator::Now ().GetSeconds ();
-
-  stringstream ss;
-  ss << "TX: " << Simulator::Now ().GetSeconds () << " s: " << m_tagValue << ". " << m_cnt - 1
-     << " ; total: " << ++txCnt;
-  if(isPrintTx) NS_LOG_INFO (ss.str ());
-
+  
   Ptr<Packet> packet = Create<Packet> (m_packetSize);
   packet->AddPacketTag (tag); //add tags
-
   m_socket->Send (packet);
-
-  //if (++m_packetsSent < m_nPackets)
-  //{
   ScheduleTx ();
-  //}
 }
 
 void
