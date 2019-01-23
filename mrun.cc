@@ -213,7 +213,8 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     protocol = pt;
     bottleneckBw = bw;
     bottleneckDelay = delay;
-    qc = setQueue(groups, bottleneckBw, bottleneckDelay, Th);
+    // qc = setQueue(groups, bottleneckBw, bottleneckDelay, Th);
+
     ifc = setAddress();
     sinkApp = setSink(groups, protocol);
     senderApp = setSender(groups, protocol);
@@ -245,6 +246,26 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
     }
 
     return qc;
+}
+
+QueueDiscContainer RunningModule::setPrioQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
+{
+    NS_LOG_FUNCTION("Begin Prio Queue.");
+    QueueDiscContainer qc;
+    for(uint32_t i = 0; i < grp.size(); i ++)
+    {
+        TrafficControlHelper tch;
+        uint32_t handle = tch.SetRootQueueDisc("ns3::PrioQueueDisc", "Priomap", StringValue("0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1"));
+        TrafficControlHelper::ClassIdList cid = tch.AddQueueDiscClasses(handle, 2, "ns3::QueueDiscClass");
+        tch.AddChildQueueDisc(handle, cid[0], "ns3::RedQueueDisc");
+        tch.AddChildQueueDisc(handle, cid[1], "ns3::RedQueueDisc");
+        tch.AddPacketFilter(handle, "ns3::PrioQueueDiscTestFilter");
+
+        // how to return the packet filter to update rwnd / cwnd??
+    }
+
+    return qc;
+
 }
 
 Ipv4InterfaceContainer RunningModule::setAddress()
@@ -392,7 +413,8 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         mboxes.at(i).install(nc);                       // install probes for all tx router's mac rx side
         NS_LOG_FUNCTION("Mbox installed on router " + to_string(i));
         
-        // start mbox
+        // set weight & start mbox
+        mboxes.at(i).SetWeight(grp.at(i).weight);
         mboxes.at(i).start();
         
         // tracing
@@ -407,8 +429,6 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         txRouter->TraceConnectWithoutContext("PhyTxDrop", MakeCallback(&MiddlePoliceBox::onPhyTxDrop, &mboxes.at(i)));
         for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
             txNode->GetDevice(j)->TraceConnectWithoutContext("PhyRxDrop", MakeCallback(&MiddlePoliceBox::onPhyRxDrop, &mboxes.at(i)));
-        
-
 
         // flow control
         mboxes.at(i).flowControl(mboxes.at(i).GetFairness(), interval, logInterval);
@@ -503,15 +523,15 @@ int main ()
     // set start and stop time
     vector<double> t(2);
     t[0] = 0.0;
-    t[1] = 25.0;
+    t[1] = 50.0;
     srand(time(0));
 
     // define bottleneck link bandwidth and delay, protocol, fairness
-    // vector<string> bnBw{"1Mbps", "1Mbps"};
-    vector<string> bnBw{"10Mbps"};
+    vector<string> bnBw{"10Mbps", "10Mbps"};
+    // vector<string> bnBw{"10Mbps"};
     vector<string> bnDelay{"2ms", "2ms"};
-    ProtocolType pt = UDP;
-    FairType fairness = PERSENDER;
+    ProtocolType pt = TCP;
+    FairType fairness = PRIORITY;
     bool isTrackPkt = false;
 
     // for copy constructor test only
@@ -531,31 +551,33 @@ int main ()
     // Group g1(rtid, tx2rate1, rxId1, rate2port1);
     // g1.insertLink({1, 2}, {7, 8});
 
-    // // group: 2*2, 1
-    vector<uint32_t> rtid = {5, 6};
-    map<uint32_t, string> tx2rate1 = {{1, "20Mbps"}, {2, "20Mbps"}, {3, "40Mbps"}, {4, "40Mbps"}};
-    vector<uint32_t> rxId1 = {7, 8, 9, 10};
-    map<string, uint32_t> rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
-    Group g1(rtid, tx2rate1, rxId1, rate2port1);
-    g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
-
-    // group: 3, 2
-    // cout << "Generating groups of nodes ... " << endl;
-    // vector<uint32_t> rtid = {25, 49};
-    // map<uint32_t, string> tx2rate1 = {{10, "2Mbps"}, {11, "4Mbps"}};
-    // vector<uint32_t> rxId1 = {2,3};
+    // group: 2*2, 1
+    // vector<uint32_t> rtid = {5, 6};
+    // map<uint32_t, string> tx2rate1 = {{1, "2Mbps"}, {2, "2Mbps"}, {3, "4Mbps"}, {4, "4Mbps"}};
+    // vector<uint32_t> rxId1 = {7, 8, 9, 10};
     // map<string, uint32_t> rate2port1 = {{"2Mbps", 80}, {"4Mbps", 90}};
     // Group g1(rtid, tx2rate1, rxId1, rate2port1);
-    // g1.insertLink({10, 11}, {2, 3});
+    // g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
 
-    // vector<uint32_t> rtid2 = {26, 50};
-    // map<uint32_t, string> tx2rate2 = {{10, "2Mbps"}, {12, "4Mbps"}};
-    // vector<uint32_t> rxId2 = {2,4};
-    // map<string, uint32_t> rate2port2 = {{"2Mbps", 80}, {"4Mbps", 90}};
-    // Group g2(rtid2, tx2rate2, rxId2, rate2port2);
-    // g2.insertLink({10, 12}, {2, 4});
+    // group: 3, 2
+    cout << "Generating groups of nodes ... " << endl;
+    vector<double> weight = {0.9, 0.1};
 
-    vector<Group> grps({g1});
+    vector<uint32_t> rtid = {25, 49};
+    map<uint32_t, string> tx2rate1 = {{10, "20Mbps"}, {11, "40Mbps"}};
+    vector<uint32_t> rxId1 = {2,3};
+    map<string, uint32_t> rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
+    Group g1(rtid, tx2rate1, rxId1, rate2port1, weight);
+    g1.insertLink({10, 11}, {2, 3});
+
+    vector<uint32_t> rtid2 = {26, 50};
+    map<uint32_t, string> tx2rate2 = {{10, "20Mbps"}, {12, "40Mbps"}};
+    vector<uint32_t> rxId2 = {2,4};
+    map<string, uint32_t> rate2port2 = {{"20Mbps", 80}, {"40Mbps", 90}};
+    Group g2(rtid2, tx2rate2, rxId2, rate2port2, weight);
+    g2.insertLink({10, 12}, {2, 4});
+
+    vector<Group> grps({g1, g2});
 
     // running module construction
     LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
@@ -567,11 +589,11 @@ int main ()
 
     // mbox construction
     cout << "Configuring ... " << endl;
-    MiddlePoliceBox mbox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, isTrackPkt);         // vector{nSender, nReceiver, nClient, nAttacker}
-    // MiddlePoliceBox mbox2(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness);    
+    MiddlePoliceBox mbox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt);         // vector{nSender, nReceiver, nClient, nAttacker}
+    MiddlePoliceBox mbox2(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt);    
         // limitation: mbox could only process 2 rate level!
-    // vector<MiddlePoliceBox> mboxes({mbox, mbox2});
-    vector<MiddlePoliceBox> mboxes({mbox});
+    vector<MiddlePoliceBox> mboxes({mbox, mbox2});
+    // vector<MiddlePoliceBox> mboxes({mbox});
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
 
     // // test pause, resume and disconnect mbox
