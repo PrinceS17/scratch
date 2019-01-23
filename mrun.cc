@@ -213,7 +213,7 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     protocol = pt;
     bottleneckBw = bw;
     bottleneckDelay = delay;
-    // qc = setQueue(groups, bottleneckBw, bottleneckDelay, Th);
+    qc = setQueue(groups, bottleneckBw, bottleneckDelay, Th);
 
     ifc = setAddress();
     sinkApp = setSink(groups, protocol);
@@ -248,25 +248,25 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
     return qc;
 }
 
-QueueDiscContainer RunningModule::setPrioQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
-{
-    NS_LOG_FUNCTION("Begin Prio Queue.");
-    QueueDiscContainer qc;
-    for(uint32_t i = 0; i < grp.size(); i ++)
-    {
-        TrafficControlHelper tch;
-        uint32_t handle = tch.SetRootQueueDisc("ns3::PrioQueueDisc", "Priomap", StringValue("0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1"));
-        TrafficControlHelper::ClassIdList cid = tch.AddQueueDiscClasses(handle, 2, "ns3::QueueDiscClass");
-        tch.AddChildQueueDisc(handle, cid[0], "ns3::RedQueueDisc");
-        tch.AddChildQueueDisc(handle, cid[1], "ns3::RedQueueDisc");
-        tch.AddPacketFilter(handle, "ns3::PrioQueueDiscTestFilter");
+// QueueDiscContainer RunningModule::setPrioQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
+// {
+//     NS_LOG_FUNCTION("Begin Prio Queue.");
+//     QueueDiscContainer qc;
+//     for(uint32_t i = 0; i < grp.size(); i ++)
+//     {
+//         TrafficControlHelper tch;
+//         uint32_t handle = tch.SetRootQueueDisc("ns3::PrioQueueDisc", "Priomap", StringValue("0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1"));
+//         TrafficControlHelper::ClassIdList cid = tch.AddQueueDiscClasses(handle, 2, "ns3::QueueDiscClass");
+//         tch.AddChildQueueDisc(handle, cid[0], "ns3::RedQueueDisc");
+//         tch.AddChildQueueDisc(handle, cid[1], "ns3::RedQueueDisc");
+//         tch.AddPacketFilter(handle, "ns3::PrioQueueDiscTestFilter");
 
-        // how to return the packet filter to update rwnd / cwnd??
-    }
+//         // how to return the packet filter to update rwnd / cwnd??
+//     }
 
-    return qc;
+//     return qc;
 
-}
+// }
 
 Ipv4InterfaceContainer RunningModule::setAddress()
 {
@@ -526,13 +526,25 @@ int main ()
     t[1] = 50.0;
     srand(time(0));
 
-    // define bottleneck link bandwidth and delay, protocol, fairness
-    vector<string> bnBw{"10Mbps", "10Mbps"};
-    // vector<string> bnBw{"10Mbps"};
-    vector<string> bnDelay{"2ms", "2ms"};
+    // define the test options
     ProtocolType pt = TCP;
     FairType fairness = PRIORITY;
     bool isTrackPkt = false;
+    uint32_t nTx = 2;               // sender number, i.e. link number
+    uint32_t nGrp = 1;              // group number
+
+    // define bottleneck link bandwidth and delay, protocol, fairness
+    vector<string> bnBw, bnDelay;
+    if(nGrp == 1)
+    {
+        bnBw = {"10Mbps"};
+        bnDelay = {"2ms"};
+    }
+    else if(nGrp == 2)
+    {
+        bnBw = {"10Mbps", "10Mbps"};
+        bnDelay = {"2ms", "2ms"};
+    }
 
     // for copy constructor test only
     cout << "Is MiddlePoliceBox move_constructible? " << is_move_constructible<MiddlePoliceBox>::value << endl;
@@ -542,42 +554,50 @@ int main ()
 
     // generating groups
     cout << "Generating groups of nodes ... " << endl;
-    
-    // group: 2*1, 1
-    // vector<uint32_t> rtid = {5, 6};
-    // map<uint32_t, string> tx2rate1 = {{1, "2Mbps"}, {2, "4Mbps"}};
-    // vector<uint32_t> rxId1 = {7, 8};
-    // map<string, uint32_t> rate2port1 = {{"2Mbps", 80}, {"4Mbps", 90}};
-    // Group g1(rtid, tx2rate1, rxId1, rate2port1);
-    // g1.insertLink({1, 2}, {7, 8});
+    vector<double> weight = {0.7, 0.3};
+    vector<uint32_t> rtid, rtid2, rxId1, rxId2;
+    map<uint32_t, string> tx2rate1, tx2rate2;
+    map<string, uint32_t> rate2port1, rate2port2;
+    Group g1, g2;
+    vector<Group> grps;
 
-    // group: 2*2, 1
-    // vector<uint32_t> rtid = {5, 6};
-    // map<uint32_t, string> tx2rate1 = {{1, "2Mbps"}, {2, "2Mbps"}, {3, "4Mbps"}, {4, "4Mbps"}};
-    // vector<uint32_t> rxId1 = {7, 8, 9, 10};
-    // map<string, uint32_t> rate2port1 = {{"2Mbps", 80}, {"4Mbps", 90}};
-    // Group g1(rtid, tx2rate1, rxId1, rate2port1);
-    // g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
+    if(nTx == 2 && nGrp == 1) // group: 2*1, 1
+    {
+        rtid = {5, 6};
+        tx2rate1 = {{1, "20Mbps"}, {2, "40Mbps"}};
+        rxId1 = {7, 8};
+        rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
+        g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);      // skeptical
+        g1.insertLink({1, 2}, {7, 8});
+        grps = {g1};
+    }
+    else if(nTx == 4 && nGrp == 1) // group: 2*2, 1
+    {
+        rtid = {5, 6};
+        tx2rate1 = {{1, "20Mbps"}, {2, "20Mbps"}, {3, "40Mbps"}, {4, "40Mbps"}};
+        rxId1 = {7, 8, 9, 10};
+        rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
+        g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
+        g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
+        grps = {g1};
+    }
+    else if(nTx == 3 && nGrp == 2) // group: 3, 2
+    {
+        rtid = {25, 49};
+        tx2rate1 = {{10, "20Mbps"}, {11, "40Mbps"}};
+        rxId1 = {2,3};
+        rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
+        g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
+        g1.insertLink({10, 11}, {2, 3});
 
-    // group: 3, 2
-    cout << "Generating groups of nodes ... " << endl;
-    vector<double> weight = {0.9, 0.1};
-
-    vector<uint32_t> rtid = {25, 49};
-    map<uint32_t, string> tx2rate1 = {{10, "20Mbps"}, {11, "40Mbps"}};
-    vector<uint32_t> rxId1 = {2,3};
-    map<string, uint32_t> rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
-    Group g1(rtid, tx2rate1, rxId1, rate2port1, weight);
-    g1.insertLink({10, 11}, {2, 3});
-
-    vector<uint32_t> rtid2 = {26, 50};
-    map<uint32_t, string> tx2rate2 = {{10, "20Mbps"}, {12, "40Mbps"}};
-    vector<uint32_t> rxId2 = {2,4};
-    map<string, uint32_t> rate2port2 = {{"20Mbps", 80}, {"40Mbps", 90}};
-    Group g2(rtid2, tx2rate2, rxId2, rate2port2, weight);
-    g2.insertLink({10, 12}, {2, 4});
-
-    vector<Group> grps({g1, g2});
+        rtid2 = {26, 50};
+        tx2rate2 = {{10, "20Mbps"}, {12, "40Mbps"}};
+        rxId2 = {2,4};
+        rate2port2 = {{"20Mbps", 80}, {"40Mbps", 90}};
+        g2 = Group(rtid2, tx2rate2, rxId2, rate2port2, weight);
+        g2.insertLink({10, 12}, {2, 4});
+        grps = {g1, g2};
+    }
 
     // running module construction
     LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
