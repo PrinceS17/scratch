@@ -530,7 +530,7 @@ int main ()
     ProtocolType pt = TCP;
     FairType fairness = PRIORITY;
     bool isTrackPkt = false;
-    uint32_t nTx = 2;               // sender number, i.e. link number
+    uint32_t nTx = 4;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
 
     // define bottleneck link bandwidth and delay, protocol, fairness
@@ -554,7 +554,7 @@ int main ()
 
     // generating groups
     cout << "Generating groups of nodes ... " << endl;
-    vector<double> weight = {0.7, 0.3};
+    vector<double> weight;
     vector<uint32_t> rtid, rtid2, rxId1, rxId2;
     map<uint32_t, string> tx2rate1, tx2rate2;
     map<string, uint32_t> rate2port1, rate2port2;
@@ -567,6 +567,7 @@ int main ()
         tx2rate1 = {{1, "20Mbps"}, {2, "40Mbps"}};
         rxId1 = {7, 8};
         rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
+        weight = {0.7, 0.3};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);      // skeptical
         g1.insertLink({1, 2}, {7, 8});
         grps = {g1};
@@ -577,6 +578,7 @@ int main ()
         tx2rate1 = {{1, "20Mbps"}, {2, "20Mbps"}, {3, "40Mbps"}, {4, "40Mbps"}};
         rxId1 = {7, 8, 9, 10};
         rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
+        weight = {0.4, 0.4, 0.1, 0.1};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
         g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
         grps = {g1};
@@ -587,6 +589,7 @@ int main ()
         tx2rate1 = {{10, "20Mbps"}, {11, "40Mbps"}};
         rxId1 = {2,3};
         rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
+        weight = {0.7, 0.3};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
         g1.insertLink({10, 11}, {2, 3});
 
@@ -609,11 +612,17 @@ int main ()
 
     // mbox construction
     cout << "Configuring ... " << endl;
-    MiddlePoliceBox mbox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt);         // vector{nSender, nReceiver, nClient, nAttacker}
-    MiddlePoliceBox mbox2(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt);    
-        // limitation: mbox could only process 2 rate level!
-    vector<MiddlePoliceBox> mboxes({mbox, mbox2});
-    // vector<MiddlePoliceBox> mboxes({mbox});
+    // vector<MiddlePoliceBox> mboxes;
+    MiddlePoliceBox mbox1, mbox2;
+    double beta = 0.8;
+    double Th = 0.05;
+    if(nGrp == 1 && nTx == 4)
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, isTrackPkt, beta, Th);    
+    else
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th);         // vector{nSender, nReceiver, nClient, nAttacker}
+    // limitation: mbox could only process 2 rate level!
+    mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th);
+    vector<MiddlePoliceBox> mboxes({mbox1,mbox2});
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
 
     // // test pause, resume and disconnect mbox
