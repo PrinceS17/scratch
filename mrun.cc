@@ -221,7 +221,7 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     // this->mboxes = mboxes;
     for(uint32_t i = 0; i < mboxes.size(); i ++)
         this->mboxes.push_back(mboxes.at(i));
-    connectMbox(groups, 1.0, 1.0);      // manually set here 
+    connectMbox(groups, 1.0, 0.5);      // manually set here 
 }
 
 QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
@@ -523,15 +523,16 @@ int main ()
     // set start and stop time
     vector<double> t(2);
     t[0] = 0.0;
-    t[1] = 50.0;
+    t[1] = 10.0;
     srand(time(0));
 
-    // define the test options
+    // define the test options and parameteres
     ProtocolType pt = TCP;
     FairType fairness = PRIORITY;
     bool isTrackPkt = false;
-    uint32_t nTx = 4;               // sender number, i.e. link number
+    uint32_t nTx = 2;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
+    double Th = 0.04;               // threshold of slr/llr
 
     // define bottleneck link bandwidth and delay, protocol, fairness
     vector<string> bnBw, bnDelay;
@@ -615,14 +616,17 @@ int main ()
     // vector<MiddlePoliceBox> mboxes;
     MiddlePoliceBox mbox1, mbox2;
     double beta = 0.8;
-    double Th = 0.05;
     if(nGrp == 1 && nTx == 4)
         mbox1 = MiddlePoliceBox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, isTrackPkt, beta, Th);    
     else
         mbox1 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th);         // vector{nSender, nReceiver, nClient, nAttacker}
     // limitation: mbox could only process 2 rate level!
-    mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th);
-    vector<MiddlePoliceBox> mboxes({mbox1,mbox2});
+    vector<MiddlePoliceBox> mboxes({mbox1});
+    if(nGrp == 2) 
+    {
+        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th);
+        mboxes.push_back(mbox2);
+    }
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
 
     // // test pause, resume and disconnect mbox
