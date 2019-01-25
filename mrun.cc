@@ -523,7 +523,7 @@ int main ()
     // set start and stop time
     vector<double> t(2);
     t[0] = 0.0;
-    t[1] = 10.0;
+    t[1] = 100.0;
     srand(time(0));
 
     // define the test options and parameteres
@@ -532,7 +532,7 @@ int main ()
     bool isTrackPkt = false;
     uint32_t nTx = 2;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
-    double Th = 0.04;               // threshold of slr/llr
+    double Th = 0.05;               // threshold of slr/llr
 
     // define bottleneck link bandwidth and delay, protocol, fairness
     vector<string> bnBw, bnDelay;
