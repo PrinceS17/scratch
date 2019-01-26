@@ -532,7 +532,7 @@ int main ()
     bool isTrackPkt = false;
     uint32_t nTx = 2;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
-    double Th = 0.05;               // threshold of slr/llr
+    double Th = 0.01;               // threshold of slr/llr
 
     // define bottleneck link bandwidth and delay, protocol, fairness
     vector<string> bnBw, bnDelay;
@@ -565,9 +565,9 @@ int main ()
     if(nTx == 2 && nGrp == 1) // group: 2*1, 1
     {
         rtid = {5, 6};
-        tx2rate1 = {{1, "20Mbps"}, {2, "40Mbps"}};
+        tx2rate1 = {{1, "1Mbps"}, {2, "10Mbps"}};
         rxId1 = {7, 8};
-        rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
+        rate2port1 = {{"1Mbps", 80}, {"10Mbps", 90}};
         weight = {0.7, 0.3};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);      // skeptical
         g1.insertLink({1, 2}, {7, 8});
