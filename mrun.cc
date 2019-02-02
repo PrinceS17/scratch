@@ -221,7 +221,7 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     // this->mboxes = mboxes;
     for(uint32_t i = 0; i < mboxes.size(); i ++)
         this->mboxes.push_back(mboxes.at(i));
-    connectMbox(groups, 1.0, 0.5);      // manually set here 
+    connectMbox(groups, 0.012, 1.0);      // manually set here 
 }
 
 QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
@@ -473,11 +473,11 @@ void RunningModule::pauseMbox(vector<Group> grp)
     {
         Ptr<Node> txNode = GetRouter(i, true);
         // txRouter->TraceDisconnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mb));
-        // txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTxWoDrop, &mb));
+        // txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacRxWoDrop, &mb));
         for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
         {
             txNode->GetDevice(j)->TraceDisconnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
-            txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacTxWoDrop, &mboxes.at(i)));
+            txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRxWoDrop, &mboxes.at(i)));
         }
     }
 }
@@ -489,10 +489,10 @@ void RunningModule::resumeMbox(vector<Group> grp)
     {
         Ptr<Node> txNode = GetRouter(i, true);
         // txRouter->TraceDisconnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mb));
-        // txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTxWoDrop, &mb));
+        // txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacRxWoDrop, &mb));
         for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
         {
-            txNode->GetDevice(j)->TraceDisconnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacTxWoDrop, &mboxes.at(i)));
+            txNode->GetDevice(j)->TraceDisconnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRxWoDrop, &mboxes.at(i)));
             txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
         }
     }
@@ -523,7 +523,7 @@ int main ()
     // set start and stop time
     vector<double> t(2);
     t[0] = 0.0;
-    t[1] = 100.0;
+    t[1] = 10.0;
     srand(time(0));
 
     // define the test options and parameteres
@@ -532,7 +532,10 @@ int main ()
     bool isTrackPkt = false;
     uint32_t nTx = 2;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
-    double Th = 0.01;               // threshold of slr/llr
+    double Th = 0.005;              // threshold of slr/llr
+
+    // specify the TCP socket type in ns-3
+    Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));       
 
     // define bottleneck link bandwidth and delay, protocol, fairness
     vector<string> bnBw, bnDelay;
@@ -565,9 +568,9 @@ int main ()
     if(nTx == 2 && nGrp == 1) // group: 2*1, 1
     {
         rtid = {5, 6};
-        tx2rate1 = {{1, "1Mbps"}, {2, "10Mbps"}};
+        tx2rate1 = {{1, "10Mbps"}, {2, "20Mbps"}};
         rxId1 = {7, 8};
-        rate2port1 = {{"1Mbps", 80}, {"10Mbps", 90}};
+        rate2port1 = {{"10Mbps", 80}, {"20Mbps", 90}};
         weight = {0.7, 0.3};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);      // skeptical
         g1.insertLink({1, 2}, {7, 8});
@@ -632,7 +635,7 @@ int main ()
     // // test pause, resume and disconnect mbox
     // Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
     // Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
-    // Simulator::Schedule(Seconds(11.1), &RunningModule::pauseMbox, &rm, grps);
+    // Simulator::Schedule(Seconds(0.1), &RunningModule::pauseMbox, &rm, grps);
     // Simulator::Schedule(Seconds(14.1), &RunningModule::resumeMbox, &rm, grps);
 
     // flow monitor
