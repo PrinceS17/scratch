@@ -221,7 +221,7 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     // this->mboxes = mboxes;
     for(uint32_t i = 0; i < mboxes.size(); i ++)
         this->mboxes.push_back(mboxes.at(i));
-    connectMbox(groups, 0.012, 1.0);      // manually set here 
+    connectMbox(groups, 1.0, 1.0);      // manually set here 
 }
 
 QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
@@ -424,11 +424,23 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
 
         // reduntant: for debug only
-        txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mboxes.at(i)));
-        txRouter->TraceConnectWithoutContext("MacTxDrop", MakeCallback(&MiddlePoliceBox::onMacTxDrop, &mboxes.at(i)));
+        // txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mboxes.at(i)));
+        // txRouter->TraceConnectWithoutContext("MacTxDrop", MakeCallback(&MiddlePoliceBox::onMacTxDrop, &mboxes.at(i)));
         txRouter->TraceConnectWithoutContext("PhyTxDrop", MakeCallback(&MiddlePoliceBox::onPhyTxDrop, &mboxes.at(i)));
         for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
             txNode->GetDevice(j)->TraceConnectWithoutContext("PhyRxDrop", MakeCallback(&MiddlePoliceBox::onPhyRxDrop, &mboxes.at(i)));
+
+        // for debug: test the sender's ack
+        for(uint32_t j = 0; j < grp.at(i).txId.size(); j ++)
+        {
+            stringstream ss;
+            Ptr<NetDevice> tx0 = GetNode(i, grp.at(i).txId.at(j))->GetDevice(0);
+            Ptr<NetDevice> tx1 = GetNode(i, grp.at(i).txId.at(j))->GetDevice(1);
+            ss << "TX[0] address: " << tx0->GetAddress() << ";\nTX[1] address: " << tx1->GetAddress();
+            NS_LOG_INFO(ss.str());
+            tx0->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onAckRx, &mboxes.at(i)));
+        }
+
 
         // flow control
         mboxes.at(i).flowControl(mboxes.at(i).GetFairness(), interval, logInterval);
@@ -518,13 +530,15 @@ void RunningModule::stop()
     sinkApp.Stop(Seconds(0.0));
 }   
 
-int main ()
+int main (int argc, char *argv[])
 {
     // set start and stop time
     vector<double> t(2);
     t[0] = 0.0;
-    t[1] = 10.0;
+    t[1] = 150.0;
     srand(time(0));
+    Packet::EnablePrinting ();          // enable printing the metadata of packet
+    Packet::EnableChecking ();
 
     // define the test options and parameteres
     ProtocolType pt = TCP;
@@ -532,10 +546,30 @@ int main ()
     bool isTrackPkt = false;
     uint32_t nTx = 2;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
-    double Th = 0.005;              // threshold of slr/llr
+    vector<double> Th = {0.01, 0.05};     // threshold of slr/llr
+    double slrTh, llrTh, tStop;
+    uint32_t MID1 = 0;
+    uint32_t MID2 = 0;
 
     // specify the TCP socket type in ns-3
     Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));       
+
+    // command line parameters: focus on slr and llr threshold first, should display in figure name
+    CommandLine cmd;
+    cmd.AddValue ("tStop", "Stop time of the simulation", tStop);
+    cmd.AddValue ("slrTh", "SLR threshold", slrTh);
+    cmd.AddValue ("llrTh", "LLR threshold", llrTh);
+    cmd.AddValue ("mid1", "Mbox 1 ID", MID1);
+    cmd.AddValue ("mid2", "Mbox 2 ID", MID2);
+    cmd.Parse (argc, argv);
+
+    Th = {slrTh, llrTh};
+    t[1] = tStop;
+    cout << "Stop time: " << tStop << endl;
+    cout << "SLR threshold: " << slrTh << endl;
+    cout << "LLR threshold: " << llrTh << endl;
+    cout << "MID 1: " << MID1 << endl;
+    cout << "MID 2: " << MID2 << endl;
 
     // define bottleneck link bandwidth and delay, protocol, fairness
     vector<string> bnBw, bnDelay;
@@ -550,11 +584,11 @@ int main ()
         bnDelay = {"2ms", "2ms"};
     }
 
-    // for copy constructor test only
-    cout << "Is MiddlePoliceBox move_constructible? " << is_move_constructible<MiddlePoliceBox>::value << endl;
-    cout << "Is MiddlePoliceBox move assignable? " << is_move_assignable<MiddlePoliceBox>::value << endl;
-    cout << "Is MiddlePoliceBox default_constructible? " << is_default_constructible<MiddlePoliceBox>::value << endl;
-    cout << "Is MiddlePoliceBox copy_constructible? " << is_copy_constructible<MiddlePoliceBox>::value << endl;
+    // // for copy constructor test only
+    // cout << "Is MiddlePoliceBox move_constructible? " << is_move_constructible<MiddlePoliceBox>::value << endl;
+    // cout << "Is MiddlePoliceBox move assignable? " << is_move_assignable<MiddlePoliceBox>::value << endl;
+    // cout << "Is MiddlePoliceBox default_constructible? " << is_default_constructible<MiddlePoliceBox>::value << endl;
+    // cout << "Is MiddlePoliceBox copy_constructible? " << is_copy_constructible<MiddlePoliceBox>::value << endl;
 
     // generating groups
     cout << "Generating groups of nodes ... " << endl;
@@ -607,8 +641,8 @@ int main ()
     }
 
     // running module construction
-    LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
-    LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);
+    // LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
+    // LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);
     cout << "Initializing running module..." << endl;
     RunningModule rm(t, grps, pt, bnBw, bnDelay, "2ms", isTrackPkt, 1000);
     cout << "Building topology ... " << endl;
@@ -620,14 +654,14 @@ int main ()
     MiddlePoliceBox mbox1, mbox2;
     double beta = 0.8;
     if(nGrp == 1 && nTx == 4)
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, isTrackPkt, beta, Th);    
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1);    
     else
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th);         // vector{nSender, nReceiver, nClient, nAttacker}
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1);         // vector{nSender, nReceiver, nClient, nAttacker}
     // limitation: mbox could only process 2 rate level!
     vector<MiddlePoliceBox> mboxes({mbox1});
     if(nGrp == 2) 
     {
-        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th);
+        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID2);
         mboxes.push_back(mbox2);
     }
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
