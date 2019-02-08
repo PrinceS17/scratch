@@ -218,10 +218,14 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     ifc = setAddress();
     sinkApp = setSink(groups, protocol);
     senderApp = setSender(groups, protocol);
-    // this->mboxes = mboxes;
-    for(uint32_t i = 0; i < mboxes.size(); i ++)
-        this->mboxes.push_back(mboxes.at(i));
-    connectMbox(groups, 1.0, 1.0);      // manually set here 
+    cout << "m size: " << mboxes.size() << endl;
+    this->mboxes = mboxes;
+    // for(uint32_t i = 0; i < mboxes.size(); i ++)
+    //     this->mboxes.push_back(mboxes.at(i));
+    // manually set here
+    // connectMbox(groups, 0.012, 0.5);      // 0.012: rtt, rate switches between node 0/1
+    connectMbox(groups, 0.06, 0.5);       // good for LLR and SLR method
+    // connectMbox(groups, 0.096, 0.5);     // bad for EBRC
 }
 
 QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
@@ -413,8 +417,17 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         mboxes.at(i).install(nc);                       // install probes for all tx router's mac rx side
         NS_LOG_FUNCTION("Mbox installed on router " + to_string(i));
         
-        // set weight & start mbox
+        // set weight, rtt, rto & start mbox
+        vector<double> rtt;
+        for(uint32_t j = 0; j < grp.at(i).txId.size(); j ++)
+        {
+            double bnDelay = (bottleneckDelay.at(i).c_str()[0] - '0') / 1000.0;
+            double dely = (delay.c_str()[0] - '0') / 1000.0;
+            NS_LOG_INFO("rtt[" + to_string(j) + "]: " + to_string(bnDelay + 2 * dely));
+            rtt.push_back(2 * (bnDelay + 2 * dely) );
+        }
         mboxes.at(i).SetWeight(grp.at(i).weight);
+        mboxes.at(i).SetRttRto(rtt);
         mboxes.at(i).start();
         
         // tracing
@@ -424,7 +437,8 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
 
         // reduntant: for debug only
-        // txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mboxes.at(i)));
+        if(isTrackPkt) 
+            txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mboxes.at(i)));
         // txRouter->TraceConnectWithoutContext("MacTxDrop", MakeCallback(&MiddlePoliceBox::onMacTxDrop, &mboxes.at(i)));
         txRouter->TraceConnectWithoutContext("PhyTxDrop", MakeCallback(&MiddlePoliceBox::onPhyTxDrop, &mboxes.at(i)));
         for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
@@ -535,7 +549,6 @@ int main (int argc, char *argv[])
     // set start and stop time
     vector<double> t(2);
     t[0] = 0.0;
-    t[1] = 150.0;
     srand(time(0));
     Packet::EnablePrinting ();          // enable printing the metadata of packet
     Packet::EnableChecking ();
@@ -546,8 +559,10 @@ int main (int argc, char *argv[])
     bool isTrackPkt = false;
     uint32_t nTx = 2;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
-    vector<double> Th = {0.01, 0.05};     // threshold of slr/llr
-    double slrTh, llrTh, tStop;
+    vector<double> Th;     // threshold of slr/llr
+    double slrTh = 0.01;
+    double llrTh = 0.01;
+    double tStop = 50;
     uint32_t MID1 = 0;
     uint32_t MID2 = 0;
 
@@ -561,6 +576,7 @@ int main (int argc, char *argv[])
     cmd.AddValue ("llrTh", "LLR threshold", llrTh);
     cmd.AddValue ("mid1", "Mbox 1 ID", MID1);
     cmd.AddValue ("mid2", "Mbox 2 ID", MID2);
+    cmd.AddValue ("isTrackPkt", "whether track each packet", isTrackPkt);       // input 0/1
     cmd.Parse (argc, argv);
 
     Th = {slrTh, llrTh};
@@ -641,8 +657,8 @@ int main (int argc, char *argv[])
     }
 
     // running module construction
-    // LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
-    // LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);
+    LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
+    LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);
     cout << "Initializing running module..." << endl;
     RunningModule rm(t, grps, pt, bnBw, bnDelay, "2ms", isTrackPkt, 1000);
     cout << "Building topology ... " << endl;
@@ -652,7 +668,7 @@ int main (int argc, char *argv[])
     cout << "Configuring ... " << endl;
     // vector<MiddlePoliceBox> mboxes;
     MiddlePoliceBox mbox1, mbox2;
-    double beta = 0.8;
+    double beta = 0.98;
     if(nGrp == 1 && nTx == 4)
         mbox1 = MiddlePoliceBox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1);    
     else
@@ -669,8 +685,8 @@ int main (int argc, char *argv[])
     // // test pause, resume and disconnect mbox
     // Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
     // Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
-    // Simulator::Schedule(Seconds(0.1), &RunningModule::pauseMbox, &rm, grps);
-    // Simulator::Schedule(Seconds(14.1), &RunningModule::resumeMbox, &rm, grps);
+    Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
+    Simulator::Schedule(Seconds(1.01), &RunningModule::resumeMbox, &rm, grps);
 
     // flow monitor
     Ptr<FlowMonitor> flowmon;
