@@ -23,6 +23,8 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("RunningModule");
 
 typedef multimap<uint32_t, uint32_t>::iterator mmap_iter;
+double controlInterval = 0.06;
+
 
 void RunningModule::SetNode(Ptr<Node> pn, uint32_t i, uint32_t id)
 {
@@ -224,7 +226,10 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     //     this->mboxes.push_back(mboxes.at(i));
     // manually set here
     // connectMbox(groups, 0.012, 0.5);      // 0.012: rtt, rate switches between node 0/1
-    connectMbox(groups, 0.06, 0.5);       // good for LLR and SLR method
+    // connectMbox(groups, 0.015, 0.5);      // 0.015: not fine either, seems we need to test average RTT...
+    connectMbox(groups, controlInterval, 0.5);        // not work either
+
+    // connectMbox(groups, 0.06, 0.5);       // good for LLR and SLR method
     // connectMbox(groups, 0.096, 0.5);     // bad for EBRC
 }
 
@@ -423,7 +428,7 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         {
             double bnDelay = (bottleneckDelay.at(i).c_str()[0] - '0') / 1000.0;
             double dely = (delay.c_str()[0] - '0') / 1000.0;
-            NS_LOG_INFO("rtt[" + to_string(j) + "]: " + to_string(bnDelay + 2 * dely));
+            NS_LOG_INFO("rtt[" + to_string(j) + "]: " + to_string(2 *(bnDelay + 2 * dely)));
             rtt.push_back(2 * (bnDelay + 2 * dely) );
         }
         mboxes.at(i).SetWeight(grp.at(i).weight);
@@ -557,12 +562,14 @@ int main (int argc, char *argv[])
     ProtocolType pt = TCP;
     FairType fairness = PRIORITY;
     bool isTrackPkt = false;
-    uint32_t nTx = 2;               // sender number, i.e. link number
+    bool isEbrc = true;
+    bool isTax = true;              // true: scheme 1, tax; false: scheme 2, counter
+    uint32_t nTx = 3;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
-    vector<double> Th;     // threshold of slr/llr
+    vector<double> Th;              // threshold of slr/llr
     double slrTh = 0.01;
     double llrTh = 0.01;
-    double tStop = 50;
+    double tStop = 150;
     uint32_t MID1 = 0;
     uint32_t MID2 = 0;
 
@@ -577,6 +584,7 @@ int main (int argc, char *argv[])
     cmd.AddValue ("mid1", "Mbox 1 ID", MID1);
     cmd.AddValue ("mid2", "Mbox 2 ID", MID2);
     cmd.AddValue ("isTrackPkt", "whether track each packet", isTrackPkt);       // input 0/1
+    cmd.AddValue ("cInt", "Control interval of mbox", controlInterval);
     cmd.Parse (argc, argv);
 
     Th = {slrTh, llrTh};
@@ -586,6 +594,7 @@ int main (int argc, char *argv[])
     cout << "LLR threshold: " << llrTh << endl;
     cout << "MID 1: " << MID1 << endl;
     cout << "MID 2: " << MID2 << endl;
+    cout << "Control interval: " << endl;
 
     // define bottleneck link bandwidth and delay, protocol, fairness
     vector<string> bnBw, bnDelay;
@@ -637,6 +646,18 @@ int main (int argc, char *argv[])
         g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
         grps = {g1};
     }
+    else if(nTx == 3 && nGrp == 1) // group: 3, 1
+    {
+        rtid = {5, 6};
+        tx2rate1 = {{1, "40Mbps"}, {2, "20Mbps"}, {3, "20Mbps"}};
+        rxId1 = {7, 8, 9};
+        rate2port1 = {{"40Mbps", 80}, {"20Mbps", 90}};
+        // weight = {0.6, 0.2, 0.2};
+        weight = {0.6, 0.3, 0.1};
+        g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
+        g1.insertLink({1, 2, 3}, {7, 8, 9});
+        grps = {g1};
+    }
     else if(nTx == 3 && nGrp == 2) // group: 3, 2
     {
         rtid = {25, 49};
@@ -670,14 +691,17 @@ int main (int argc, char *argv[])
     MiddlePoliceBox mbox1, mbox2;
     double beta = 0.98;
     if(nGrp == 1 && nTx == 4)
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1);    
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax});    
+    else if(nGrp == 1 && nTx == 3)
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{3,3,2,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax});         // vector{nSender, nReceiver, nClient, nAttacker}
     else
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1);         // vector{nSender, nReceiver, nClient, nAttacker}
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax});         // vector{nSender, nReceiver, nClient, nAttacker}
     // limitation: mbox could only process 2 rate level!
+
     vector<MiddlePoliceBox> mboxes({mbox1});
     if(nGrp == 2) 
     {
-        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID2);
+        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID2, 50, {isEbrc, isTax});
         mboxes.push_back(mbox2);
     }
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
