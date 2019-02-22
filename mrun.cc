@@ -25,7 +25,6 @@ NS_LOG_COMPONENT_DEFINE("RunningModule");
 typedef multimap<uint32_t, uint32_t>::iterator mmap_iter;
 double controlInterval = 0.06;
 
-
 void RunningModule::SetNode(Ptr<Node> pn, uint32_t i, uint32_t id)
 {
     Group g = groups.at(i);
@@ -119,9 +118,13 @@ Ipv4Address RunningModule::GetIpv4Addr(uint32_t i, uint32_t id)     // counting 
     return ifc.GetAddress(sender.GetN() + receiver.GetN() + i*2 + (uint32_t)(j - g.routerId.begin()));
 }
 
+uint32_t RunningModule::GetId()
+{   return ID; }
+
 RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, bool trackPkt, uint32_t size)
 {
     // constant setting
+    ID = rand() % 10000;
     nSender = 0;
     nReceiver = 0;
     for(Group g:groups)
@@ -138,7 +141,6 @@ RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType p
     bottleneckDelay = bnDelay;
     this->delay = delay;
     isTrackPkt = trackPkt;
-
 }
 
 RunningModule::~RunningModule(){}
@@ -227,7 +229,7 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     // manually set here
     // connectMbox(groups, 0.012, 0.5);      // 0.012: rtt, rate switches between node 0/1
     // connectMbox(groups, 0.015, 0.5);      // 0.015: not fine either, seems we need to test average RTT...
-    connectMbox(groups, controlInterval, 0.5);        // not work either
+    connectMbox(groups, controlInterval, 0.2);        // not work either
 
     // connectMbox(groups, 0.06, 0.5);       // good for LLR and SLR method
     // connectMbox(groups, 0.096, 0.5);     // bad for EBRC
@@ -357,6 +359,7 @@ vector< Ptr<MyApp> > RunningModule::setSender(vector<Group> grp, ProtocolType pt
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
         ss << "Set sender " << i << " ... " << endl;
+
         Group g = grp.at(i);
         for(auto tId:g.txId)
         {
@@ -366,13 +369,13 @@ vector< Ptr<MyApp> > RunningModule::setSender(vector<Group> grp, ProtocolType pt
                 vector<uint32_t>::iterator it2 = find(g.txId.begin(), g.txId.end(), tId);
                 // uint32_t tag = i*u + (uint32_t)(it2 - g.txId.begin()) + 1;      // tag: index in sender
                 uint32_t tag = (uint32_t)(it2 - g.txId.begin()) + 1;
-                ss << "RX id: " << it->second << "; Tag : " << tag << "; " << tId << " -> " << it->second << endl;
+                cout << "RX id: " << it->second << "; Tag : " << tag << "; " << tId << " -> " << it->second << endl;
                 appc.push_back(netFlow(i, tId, it->second, tag));
                 // test output
             }
         }
     }
-    // NS_LOG_INFO(ss.str());
+    NS_LOG_INFO(ss.str());
     return appc;
 }
 
@@ -383,10 +386,12 @@ Ptr<MyApp> RunningModule::netFlow(uint32_t i, uint32_t tId, uint32_t rId, uint32
     string rate = g.tx2rate.at(tId);
     uint32_t port = g.rate2port.at(rate);
     uint32_t ri = find(g.rxId.begin(), g.rxId.end(), rId) - g.rxId.begin();
+    uint32_t ti = find(g.txId.begin(), g.txId.end(), tId) - g.txId.begin();
 
     // set socket
     TypeId tpid = protocol == TCP? TcpSocketFactory::GetTypeId():UdpSocketFactory::GetTypeId();
     Ptr<Socket> skt = Socket::CreateSocket(GetNode(i, tId), tpid); 
+    if(protocol == TCP) skt->SetAttribute ("Sack", BooleanValue (false));
     // Address sinkAddr(InetSocketAddress(GetIpv4Addr(i, rId), port));
     Address sinkAddr(InetSocketAddress(dv.at(i).GetRightIpv4Address(ri), port));
     
@@ -423,33 +428,48 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         NS_LOG_FUNCTION("Mbox installed on router " + to_string(i));
         
         // set weight, rtt, rto & start mbox
-        vector<double> rtt;
+        vector<double> rtts;
         for(uint32_t j = 0; j < grp.at(i).txId.size(); j ++)
         {
             double bnDelay = (bottleneckDelay.at(i).c_str()[0] - '0') / 1000.0;
             double dely = (delay.c_str()[0] - '0') / 1000.0;
             NS_LOG_INFO("rtt[" + to_string(j) + "]: " + to_string(2 *(bnDelay + 2 * dely)));
-            rtt.push_back(2 * (bnDelay + 2 * dely) );
+            rtts.push_back(2 * (bnDelay + 2 * dely) );
         }
         mboxes.at(i).SetWeight(grp.at(i).weight);
-        mboxes.at(i).SetRttRto(rtt);
+        mboxes.at(i).SetRttRto(rtts);
         mboxes.at(i).start();
         
         // tracing
-        for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
+        for(uint32_t j = 0; j < groups.at(i).txId.size(); j ++)
             txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
         rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes.at(i)));
         qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
 
+        txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mboxes.at(i)));      // necessary for TCP loss detection
+        txRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMboxAck, &mboxes.at(i)));    // should be tested
+        
+        // trace TCP congestion window and RTT : need testing
+        for(uint32_t j = 0; j < groups.at(i).txId.size(); j ++)
+        {
+            string context1 = "/NodeList/0/$ns3::TcpL4Protocol/SocketList/" + to_string(j) + "/CongestionWindow";
+            string context2 = "/NodeList/0/$ns3::TcpL4Protocol/SocketList/" + to_string(j) + "/RTT";
+            // Config::Connect(context1, MakeCallback(&MiddlePoliceBox::onCwndChange, &mboxes.at(i)));
+            // Config::Connect(context2, MakeCallback(&MiddlePoliceBox::onRttChange, &mboxes.at(i)));
+            
+            // wrong actually! only works for limited cases : all groups have same size!
+            Ptr<Socket> skt = senderApp.at(i * groups[0].N + j)->GetSocket();
+            skt->TraceConnect("CongestionWindow", context1, MakeCallback(&MiddlePoliceBox::onCwndChange, &mboxes.at(i)));
+            skt->TraceConnect("RTT", context2, MakeCallback(&MiddlePoliceBox::onRttChange, &mboxes.at(i)));
+        }
+
         // reduntant: for debug only
-        if(isTrackPkt) 
-            txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mboxes.at(i)));
-        // txRouter->TraceConnectWithoutContext("MacTxDrop", MakeCallback(&MiddlePoliceBox::onMacTxDrop, &mboxes.at(i)));
+        txRouter->TraceConnectWithoutContext("MacTxDrop", MakeCallback(&MiddlePoliceBox::onMacTxDrop, &mboxes.at(i)));
         txRouter->TraceConnectWithoutContext("PhyTxDrop", MakeCallback(&MiddlePoliceBox::onPhyTxDrop, &mboxes.at(i)));
         for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
             txNode->GetDevice(j)->TraceConnectWithoutContext("PhyRxDrop", MakeCallback(&MiddlePoliceBox::onPhyRxDrop, &mboxes.at(i)));
 
-        // for debug: test the sender's ack
+        // for debug: test the sender's ack and mactx
         for(uint32_t j = 0; j < grp.at(i).txId.size(); j ++)
         {
             stringstream ss;
@@ -458,8 +478,27 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
             ss << "TX[0] address: " << tx0->GetAddress() << ";\nTX[1] address: " << tx1->GetAddress();
             NS_LOG_INFO(ss.str());
             tx0->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onAckRx, &mboxes.at(i)));
+            tx0->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onSenderTx, &mboxes.at(i)));
         }
 
+        // for debug: test every drop, router 2
+            // should also connect this phyRxDrop for the link?
+        Ptr<Node> rtNode = GetRouter(i, false);         // just for debug
+        rxRouter->TraceConnectWithoutContext("PhyRxDrop", MakeCallback(&MiddlePoliceBox::onPhyRxDrop2, &mboxes.at(i)));
+        rxRouter->TraceConnectWithoutContext("PhyRx", MakeCallback(&MiddlePoliceBox::onPhyRxDrop2, &mboxes.at(i)));
+        for(uint32_t j = 0; j < grp.at(i).rxId.size(); j ++)
+        {
+            Ptr<NetDevice> rx0 = rtNode->GetDevice(j + 1);  
+            rx0->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTxDrop2, &mboxes.at(i)) );
+            rx0->TraceConnectWithoutContext("PhyTx", MakeCallback(&MiddlePoliceBox::onPhyTxDrop2, &mboxes.at(i)) );
+        }
+        // test the rx side device index
+        cout << " rx0: # dev: " << rtNode->GetNDevices() << "; # rx: " << grp.at(i).rxId.size() << endl;
+        for(uint32_t k = 0; k < rtNode->GetNDevices(); k ++)
+        {
+            cout << " -- rx[" << k << "] addr: " << rtNode->GetDevice(k)->GetAddress() << endl;
+            cout << " -- rx end[" << k << "] addr: " << GetNode(i, grp.at(i).rxId[k])->GetDevice(0)->GetAddress() << endl;
+        }            
 
         // flow control
         mboxes.at(i).flowControl(mboxes.at(i).GetFairness(), interval, logInterval);
@@ -564,7 +603,7 @@ int main (int argc, char *argv[])
     bool isTrackPkt = false;
     bool isEbrc = true;
     bool isTax = true;              // true: scheme 1, tax; false: scheme 2, counter
-    uint32_t nTx = 3;               // sender number, i.e. link number
+    uint32_t nTx = 2;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
     vector<double> Th;              // threshold of slr/llr
     double slrTh = 0.01;
@@ -574,7 +613,8 @@ int main (int argc, char *argv[])
     uint32_t MID2 = 0;
 
     // specify the TCP socket type in ns-3
-    Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));       
+    Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));     
+    Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue (1400));   
 
     // command line parameters: focus on slr and llr threshold first, should display in figure name
     CommandLine cmd;
@@ -594,13 +634,14 @@ int main (int argc, char *argv[])
     cout << "LLR threshold: " << llrTh << endl;
     cout << "MID 1: " << MID1 << endl;
     cout << "MID 2: " << MID2 << endl;
-    cout << "Control interval: " << endl;
+    cout << "Control interval: " << controlInterval << endl;
 
     // define bottleneck link bandwidth and delay, protocol, fairness
     vector<string> bnBw, bnDelay;
     if(nGrp == 1)
     {
         bnBw = {"10Mbps"};
+        // bnBw = {"20Mbps"};
         bnDelay = {"2ms"};
     }
     else if(nGrp == 2)
@@ -628,8 +669,10 @@ int main (int argc, char *argv[])
     {
         rtid = {5, 6};
         tx2rate1 = {{1, "10Mbps"}, {2, "20Mbps"}};
+        // tx2rate1 = {{1, "0.01Mbps"}, {2, "20Mbps"}};               // for TCP drop debug only!
         rxId1 = {7, 8};
         rate2port1 = {{"10Mbps", 80}, {"20Mbps", 90}};
+        // rate2port1 = {{"0.01Mbps", 80}, {"20Mbps", 90}};           // for TCP drop debug only!
         weight = {0.7, 0.3};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);      // skeptical
         g1.insertLink({1, 2}, {7, 8});
@@ -710,7 +753,7 @@ int main (int argc, char *argv[])
     // Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
     // Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
     Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
-    Simulator::Schedule(Seconds(1.01), &RunningModule::resumeMbox, &rm, grps);
+    // Simulator::Schedule(Seconds(1.01), &RunningModule::resumeMbox, &rm, grps);
 
     // flow monitor
     Ptr<FlowMonitor> flowmon;
@@ -727,7 +770,7 @@ int main (int argc, char *argv[])
     Simulator::Stop(Seconds(t[1]));
     Simulator::Run();
 
-    cout << " Destroying ... " << endl << endl;
+    cout << " Running Module: " << rm.GetId() << ", Destroying ..." << endl << endl;
     flowmon->SerializeToXmlFile ("mrun.flowmon", false, false);
     Simulator::Destroy();
 
