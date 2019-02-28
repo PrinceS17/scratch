@@ -424,7 +424,10 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
             nc.Add(txNode->GetDevice(j));               // add rx side devices
 
         // install mbox
-        mboxes.at(i).install(nc);                       // install probes for all tx router's mac rx side
+        bool bypassMacRx = true;
+        if(bypassMacRx) mboxes.at(i).install(txRouter);     // install only the router net dev for bottleneck link
+        else mboxes.at(i).install(nc);                      // install probes for all tx router's mac rx side
+
         NS_LOG_FUNCTION("Mbox installed on router " + to_string(i));
         
         // set weight, rtt, rto & start mbox
@@ -441,14 +444,21 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         mboxes.at(i).start();
         
         // tracing
-        for(uint32_t j = 0; j < groups.at(i).txId.size(); j ++)
-            txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
-        rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes.at(i)));
-        qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
+        if(bypassMacRx)         // by pass the wierd bug of rwnd update: function of MacTx moved to onMacRx
+            txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i))); 
+        else
+        {
+            for(uint32_t j = 0; j < groups.at(i).txId.size(); j ++)
+                bool res = txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
+            txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mboxes.at(i)));      // necessary for TCP loss detection
+        }
 
-        txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mboxes.at(i)));      // necessary for TCP loss detection
-        txRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMboxAck, &mboxes.at(i)));    // should be tested
+        rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes.at(i)));
+        // qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
         
+        txRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMboxAck, &mboxes.at(i)));    // should be tested
+    
+
         // trace TCP congestion window and RTT : need testing
         for(uint32_t j = 0; j < groups.at(i).txId.size(); j ++)
         {
@@ -529,8 +539,8 @@ void RunningModule::disconnectMbox(vector<Group> grp)
             txNode->GetDevice(j)->TraceDisconnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
         if(!rxRouter->TraceDisconnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes[i])))
             NS_LOG_INFO("Failed to disconnect onPktRx!");
-        if(!qc.Get(i)->TraceDisconnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i))))
-            NS_LOG_INFO("Failed to disconnect onQueueDrop!");        
+        // if(!qc.Get(i)->TraceDisconnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i))))
+        //     NS_LOG_INFO("Failed to disconnect onQueueDrop!");        
 
         NS_LOG_FUNCTION("Mbox " + to_string(i) + " stops.");
     }
@@ -640,13 +650,13 @@ int main (int argc, char *argv[])
     vector<string> bnBw, bnDelay;
     if(nGrp == 1)
     {
-        bnBw = {"10Mbps"};
+        bnBw = {"100Mbps"};
         // bnBw = {"20Mbps"};
         bnDelay = {"2ms"};
     }
     else if(nGrp == 2)
     {
-        bnBw = {"10Mbps", "10Mbps"};
+        bnBw = {"100Mbps", "100Mbps"};
         bnDelay = {"2ms", "2ms"};
     }
 
@@ -668,10 +678,10 @@ int main (int argc, char *argv[])
     if(nTx == 2 && nGrp == 1) // group: 2*1, 1
     {
         rtid = {5, 6};
-        tx2rate1 = {{1, "10Mbps"}, {2, "20Mbps"}};
+        tx2rate1 = {{1, "100Mbps"}, {2, "200Mbps"}};
         // tx2rate1 = {{1, "0.01Mbps"}, {2, "20Mbps"}};               // for TCP drop debug only!
         rxId1 = {7, 8};
-        rate2port1 = {{"10Mbps", 80}, {"20Mbps", 90}};
+        rate2port1 = {{"100Mbps", 80}, {"200Mbps", 90}};
         // rate2port1 = {{"0.01Mbps", 80}, {"20Mbps", 90}};           // for TCP drop debug only!
         weight = {0.7, 0.3};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);      // skeptical
@@ -681,9 +691,9 @@ int main (int argc, char *argv[])
     else if(nTx == 4 && nGrp == 1) // group: 2*2, 1
     {
         rtid = {5, 6};
-        tx2rate1 = {{1, "20Mbps"}, {2, "20Mbps"}, {3, "40Mbps"}, {4, "40Mbps"}};
+        tx2rate1 = {{1, "200Mbps"}, {2, "200Mbps"}, {3, "400Mbps"}, {4, "400Mbps"}};
         rxId1 = {7, 8, 9, 10};
-        rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
+        rate2port1 = {{"200Mbps", 80}, {"400Mbps", 90}};
         weight = {0.4, 0.4, 0.1, 0.1};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
         g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
@@ -692,9 +702,9 @@ int main (int argc, char *argv[])
     else if(nTx == 3 && nGrp == 1) // group: 3, 1
     {
         rtid = {5, 6};
-        tx2rate1 = {{1, "40Mbps"}, {2, "20Mbps"}, {3, "20Mbps"}};
+        tx2rate1 = {{1, "400Mbps"}, {2, "200Mbps"}, {3, "200Mbps"}};
         rxId1 = {7, 8, 9};
-        rate2port1 = {{"40Mbps", 80}, {"20Mbps", 90}};
+        rate2port1 = {{"400Mbps", 80}, {"200Mbps", 90}};
         // weight = {0.6, 0.2, 0.2};
         weight = {0.6, 0.3, 0.1};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
@@ -704,17 +714,17 @@ int main (int argc, char *argv[])
     else if(nTx == 3 && nGrp == 2) // group: 3, 2
     {
         rtid = {25, 49};
-        tx2rate1 = {{10, "20Mbps"}, {11, "40Mbps"}};
+        tx2rate1 = {{10, "200Mbps"}, {11, "400Mbps"}};
         rxId1 = {2,3};
-        rate2port1 = {{"20Mbps", 80}, {"40Mbps", 90}};
+        rate2port1 = {{"200Mbps", 80}, {"400Mbps", 90}};
         weight = {0.7, 0.3};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
         g1.insertLink({10, 11}, {2, 3});
 
         rtid2 = {26, 50};
-        tx2rate2 = {{10, "20Mbps"}, {12, "40Mbps"}};
+        tx2rate2 = {{10, "200Mbps"}, {12, "400Mbps"}};
         rxId2 = {2,4};
-        rate2port2 = {{"20Mbps", 80}, {"40Mbps", 90}};
+        rate2port2 = {{"200Mbps", 80}, {"400Mbps", 90}};
         g2 = Group(rtid2, tx2rate2, rxId2, rate2port2, weight);
         g2.insertLink({10, 12}, {2, 4});
         grps = {g1, g2};
@@ -752,7 +762,7 @@ int main (int argc, char *argv[])
     // // test pause, resume and disconnect mbox
     // Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
     // Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
-    Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
+    // Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
     // Simulator::Schedule(Seconds(1.01), &RunningModule::resumeMbox, &rm, grps);
 
     // flow monitor
@@ -770,7 +780,7 @@ int main (int argc, char *argv[])
     Simulator::Stop(Seconds(t[1]));
     Simulator::Run();
 
-    cout << " Running Module: " << rm.GetId() << ", Destroying ..." << endl << endl;
+    cout << " MID: " << MID1 << "," << MID2 << " Destroying ..." << endl << endl;
     flowmon->SerializeToXmlFile ("mrun.flowmon", false, false);
     Simulator::Destroy();
 
