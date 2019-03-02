@@ -24,6 +24,7 @@ NS_LOG_COMPONENT_DEFINE("RunningModule");
 
 typedef multimap<uint32_t, uint32_t>::iterator mmap_iter;
 double controlInterval = 0.06;
+double rateUpInterval = 0.002;
 
 void RunningModule::SetNode(Ptr<Node> pn, uint32_t i, uint32_t id)
 {
@@ -229,7 +230,7 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     // manually set here
     // connectMbox(groups, 0.012, 0.5);      // 0.012: rtt, rate switches between node 0/1
     // connectMbox(groups, 0.015, 0.5);      // 0.015: not fine either, seems we need to test average RTT...
-    connectMbox(groups, controlInterval, 0.2);        // not work either
+    connectMbox(groups, controlInterval, 0.2, rateUpInterval);        // not work either
 
     // connectMbox(groups, 0.06, 0.5);       // good for LLR and SLR method
     // connectMbox(groups, 0.096, 0.5);     // bad for EBRC
@@ -408,7 +409,7 @@ Ptr<MyApp> RunningModule::netFlow(uint32_t i, uint32_t tId, uint32_t rId, uint32
     return app;
 }
 
-void RunningModule::connectMbox(vector<Group> grp, double interval, double logInterval)
+void RunningModule::connectMbox(vector<Group> grp, double interval, double logInterval, double ruInterval)
 {
     NS_LOG_FUNCTION("Connect Mbox ... ");
     for(uint32_t i = 0; i < grp.size(); i ++)
@@ -511,7 +512,7 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         }            
 
         // flow control
-        mboxes.at(i).flowControl(mboxes.at(i).GetFairness(), interval, logInterval);
+        mboxes.at(i).flowControl(mboxes.at(i).GetFairness(), interval, logInterval, ruInterval);
         
         // for test only
         stringstream ss;
@@ -552,13 +553,15 @@ void RunningModule::pauseMbox(vector<Group> grp)
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
         Ptr<Node> txNode = GetRouter(i, true);
-        // txRouter->TraceDisconnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mb));
-        // txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacRxWoDrop, &mb));
-        for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
-        {
-            txNode->GetDevice(j)->TraceDisconnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
-            txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRxWoDrop, &mboxes.at(i)));
-        }
+        Ptr<NetDevice> txRouter = txNode->GetDevice(0);
+        txRouter->TraceDisconnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
+        txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacRxWoDrop, &mboxes.at(i)));
+        // for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
+        // {
+        //     txNode->GetDevice(j)->TraceDisconnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
+        //     txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRxWoDrop, &mboxes.at(i)));
+        // }
+        
     }
 }
 
@@ -621,6 +624,7 @@ int main (int argc, char *argv[])
     double tStop = 150;
     uint32_t MID1 = 0;
     uint32_t MID2 = 0;
+    double alpha;
 
     // specify the TCP socket type in ns-3
     Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));     
@@ -635,6 +639,7 @@ int main (int argc, char *argv[])
     cmd.AddValue ("mid2", "Mbox 2 ID", MID2);
     cmd.AddValue ("isTrackPkt", "whether track each packet", isTrackPkt);       // input 0/1
     cmd.AddValue ("cInt", "Control interval of mbox", controlInterval);
+    cmd.AddValue ("rInt", "Rate update interval", rateUpInterval);
     cmd.Parse (argc, argv);
 
     Th = {slrTh, llrTh};
@@ -645,6 +650,7 @@ int main (int argc, char *argv[])
     cout << "MID 1: " << MID1 << endl;
     cout << "MID 2: " << MID2 << endl;
     cout << "Control interval: " << controlInterval << endl;
+    cout << "Rate update interval: " << rateUpInterval << endl;
 
     // define bottleneck link bandwidth and delay, protocol, fairness
     vector<string> bnBw, bnDelay;
@@ -653,11 +659,13 @@ int main (int argc, char *argv[])
         bnBw = {"100Mbps"};
         // bnBw = {"20Mbps"};
         bnDelay = {"2ms"};
+        alpha = rateUpInterval / 0.05;     // over the cover period we want
     }
     else if(nGrp == 2)
     {
         bnBw = {"100Mbps", "100Mbps"};
         bnDelay = {"2ms", "2ms"};
+        alpha = rateUpInterval / 0.05; 
     }
 
     // // for copy constructor test only
@@ -744,17 +752,17 @@ int main (int argc, char *argv[])
     MiddlePoliceBox mbox1, mbox2;
     double beta = 0.98;
     if(nGrp == 1 && nTx == 4)
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax});    
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax}, alpha);    
     else if(nGrp == 1 && nTx == 3)
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{3,3,2,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax});         // vector{nSender, nReceiver, nClient, nAttacker}
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{3,3,2,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax}, alpha);         // vector{nSender, nReceiver, nClient, nAttacker}
     else
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax});         // vector{nSender, nReceiver, nClient, nAttacker}
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax}, alpha);         // vector{nSender, nReceiver, nClient, nAttacker}
     // limitation: mbox could only process 2 rate level!
 
     vector<MiddlePoliceBox> mboxes({mbox1});
     if(nGrp == 2) 
     {
-        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID2, 50, {isEbrc, isTax});
+        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID2, 50, {isEbrc, isTax}, alpha);
         mboxes.push_back(mbox2);
     }
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
@@ -762,7 +770,7 @@ int main (int argc, char *argv[])
     // // test pause, resume and disconnect mbox
     // Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
     // Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
-    // Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
+    Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
     // Simulator::Schedule(Seconds(1.01), &RunningModule::resumeMbox, &rm, grps);
 
     // flow monitor
