@@ -629,6 +629,7 @@ int main (int argc, char *argv[])
     // specify the TCP socket type in ns-3
     Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));     
     Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue (1400));   
+    double pSize = 1.4 * 8;         // ip pkt size: 1.4 kbit
 
     // command line parameters: focus on slr and llr threshold first, should display in figure name
     CommandLine cmd;
@@ -659,13 +660,13 @@ int main (int argc, char *argv[])
         bnBw = {"100Mbps"};
         // bnBw = {"20Mbps"};
         bnDelay = {"2ms"};
-        alpha = rateUpInterval / 0.05;     // over the cover period we want
+        alpha = rateUpInterval / 0.1;     // over the cover period we want
     }
     else if(nGrp == 2)
     {
         bnBw = {"100Mbps", "100Mbps"};
         bnDelay = {"2ms", "2ms"};
-        alpha = rateUpInterval / 0.05; 
+        alpha = rateUpInterval / 0.1; 
     }
 
     // // for copy constructor test only
@@ -752,17 +753,17 @@ int main (int argc, char *argv[])
     MiddlePoliceBox mbox1, mbox2;
     double beta = 0.98;
     if(nGrp == 1 && nTx == 4)
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax}, alpha);    
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax}, alpha);    
     else if(nGrp == 1 && nTx == 3)
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{3,3,2,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax}, alpha);         // vector{nSender, nReceiver, nClient, nAttacker}
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{3,3,2,1}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax}, alpha);         // vector{nSender, nReceiver, nClient, nAttacker}
     else
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax}, alpha);         // vector{nSender, nReceiver, nClient, nAttacker}
+        mbox1 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax}, alpha);         // vector{nSender, nReceiver, nClient, nAttacker}
     // limitation: mbox could only process 2 rate level!
 
     vector<MiddlePoliceBox> mboxes({mbox1});
     if(nGrp == 2) 
     {
-        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, isTrackPkt, beta, Th, MID2, 50, {isEbrc, isTax}, alpha);
+        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID2, 50, {isEbrc, isTax}, alpha);
         mboxes.push_back(mbox2);
     }
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
@@ -770,7 +771,7 @@ int main (int argc, char *argv[])
     // // test pause, resume and disconnect mbox
     // Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
     // Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
-    Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
+    // Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
     // Simulator::Schedule(Seconds(1.01), &RunningModule::resumeMbox, &rm, grps);
 
     // flow monitor
