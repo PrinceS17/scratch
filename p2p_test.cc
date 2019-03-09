@@ -34,6 +34,7 @@ uint32_t cnt[2] = {0};
 uint32_t cnt1[2] = {0};
 uint32_t cnt2[2] = {0};
 uint32_t cnt3[2] = {0};
+uint32_t cntt[2] = {0};
 
 Ptr<PointToPointNetDevice> p2pDev;
 
@@ -42,6 +43,17 @@ void handler(QueueDiscContainer qDisc)
     double curt = Simulator::Now().GetSeconds();
     cout << curt << "s: # pkt in Q: " << qDisc.Get(0)->GetCurrentSize() << endl;
     Simulator::Schedule(Seconds(5.0), &handler, qDisc);
+}
+
+void
+onCwndChange(string context, uint32_t oldValue, uint32_t newValue)
+{
+    size_t pos = context.find("/Congestion");
+    uint32_t i = context.substr(pos - 1, 1)[0] - '0';       // get the flow index, need testing
+    // uint32_t i = context.c_str()[0] - '0';
+
+    NS_LOG_INFO("  - CongWnd = " + to_string(newValue) + "\n");
+
 }
 
 void
@@ -77,6 +89,21 @@ void PktMacTx(Ptr<const Packet> p)
 }
 
 static
+void PktMacTxDrop(Ptr<const Packet> p)
+{
+    Ptr<Packet> pcp = p->Copy();
+    MyTag tag;
+    if(pcp->PeekPacketTag(tag))
+    {
+        int idx = tag.GetSimpleValue();
+        stringstream ss;
+        ss << Simulator::Now().GetSeconds() << "s: Mac Tx Drop: " << idx << ". " << cntt[idx - 1] ++ << endl;
+        NS_LOG_INFO(ss.str());
+    }
+}
+
+
+static
 void PktMacRx(Ptr<const Packet> p)
 {
     Ptr<Packet> pcp = p->Copy();
@@ -85,7 +112,7 @@ void PktMacRx(Ptr<const Packet> p)
     {
         int idx = tag.GetSimpleValue();
         stringstream ss;
-        ss << Simulator::Now().GetSeconds() << "s: Mac Rx (drop): " << idx << ". " << cnt3[idx - 1] ++;
+        ss << Simulator::Now().GetSeconds() << "s: Mac Rx: " << idx << ". " << cnt3[idx - 1] ++;
         NS_LOG_INFO(ss.str());
 
         // for test
@@ -137,10 +164,10 @@ void QueueDrop(Ptr<const QueueDiscItem> qi)
 int
 main(int argc, char *argv[])
 {
-    string cRate = "800kbps";
-    string bRate = "80kbps";
+    string cRate = "2Mbps";
+    string bRate = "500kbps";
     string bDelay = "2ms";
-    double tStop = 5.0;
+    double tStop = 15.0;
     string qType = "RED";
     uint16_t port = 5001;
 
@@ -152,11 +179,14 @@ main(int argc, char *argv[])
     cmd.Parse (argc, argv);
     LogComponentEnable ("p2p_test", LOG_LEVEL_INFO); /// test here
 
+    Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));     
+    Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue (1000));  
+
     // p2p topology
     PointToPointHelper p2p;
     p2p.SetDeviceAttribute("DataRate", StringValue(bRate));
     p2p.SetChannelAttribute("Delay", StringValue(bDelay));
-    p2p.SetQueue("ns3::DropTailQueue", "MaxSize", StringValue("1p"));
+    // p2p.SetQueue("ns3::DropTailQueue", "MaxSize", StringValue("1p"));
 
     PointToPointHelper leaf;
     leaf.SetDeviceAttribute("DataRate", StringValue("100Mbps"));
@@ -170,11 +200,6 @@ main(int argc, char *argv[])
 
     // queue disc: different from old version
     TrafficControlHelper tch;
-    // tch.SetRootQueueDisc("ns3::RedQueueDisc",
-    //                     "MinTh", DoubleValue(5.0),
-    //                     "MaxTh", DoubleValue(10.0),
-    //                     "LinkBandwidth", StringValue(bRate),
-    //                     "LinkDelay", StringValue(bDelay));
     tch.SetRootQueueDisc("ns3::RedQueueDisc");
     tch.Install(d.GetLeft()->GetDevice(0));
     QueueDiscContainer qDiscs = tch.Install(d.GetRight()->GetDevice(0));    // QueueDiscContainer qdisc;
@@ -207,6 +232,11 @@ main(int argc, char *argv[])
         d.GetRight(i)->AddApplication(app);     // not a helper -> no install()
         app->SetStartTime(Seconds(0.1));
         app->SetStopTime(Seconds(tStop));
+
+        // tracing cwnd chagne: need test
+        string context1 = "/NodeList/0/$ns3::TcpL4Protocol/SocketList/" + to_string(i) + "/CongestionWindow";
+        app->GetSocket()->TraceConnect("CongestionWindow", context1, MakeCallback(&onCwndChange));
+        // skt->TraceConnectWithoutContext("Congestionwindow",  MakeCallback(&onCwndChange));
     }
 
     // set the p2p device
@@ -217,17 +247,16 @@ main(int argc, char *argv[])
     for (uint32_t i = 0; i < d.RightCount() + 1; i ++)
     {
         d.GetRight()->GetDevice(i)->TraceConnectWithoutContext("MacRx", MakeCallback(&PktMacRx));
-        // d.GetRight()->GetDevice(i)->TraceConnectWithoutContext("MacTxDrop", MakeCallback(&PktDrop));
         d.GetRight()->GetDevice(i)->TraceConnectWithoutContext("PhyRxDrop", MakeCallback(&PktDrop));
     }
 
-    // d.GetRight()->GetDevice(0)->TraceConnectWithoutContext("MacTx", MakeCallback(&PktMacTx));
+    d.GetRight()->GetDevice(0)->TraceConnectWithoutContext("MacTx", MakeCallback(&PktMacTx));
+    d.GetRight()->GetDevice(0)->TraceConnectWithoutContext("MacTxDrop", MakeCallback(&PktMacTx));
+    
 
     // tracing queue by visiting it from dumbbell d
     Ptr<Queue<Packet>> qp = DynamicCast<PointToPointNetDevice>(d.GetRight()->GetDevice(0))->GetQueue();
-    qp->TraceConnectWithoutContext("Drop", MakeCallback(&PktDrop));     // 
-    // qp->TraceConnectWithoutContext("EnQueue", MakeCallback(&PktDrop));
-    // qp->TraceConnectWithoutContext("DeQueue", MakeCallback(&PktDrop));
+    qp->TraceConnectWithoutContext("Drop", MakeCallback(&PktDrop));
 
     // tracing from traffic-control.cc
     // qp->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&DevPktInQ));

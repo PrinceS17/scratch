@@ -234,6 +234,10 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
 
     // connectMbox(groups, 0.06, 0.5);       // good for LLR and SLR method
     // connectMbox(groups, 0.096, 0.5);     // bad for EBRC
+
+    stringstream ss;
+    ss << "\n\n\nQueue type: " << qc.Get(0)->GetTypeId();
+    NS_LOG_INFO( ss.str() );
 }
 
 QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
@@ -657,14 +661,14 @@ int main (int argc, char *argv[])
     vector<string> bnBw, bnDelay;
     if(nGrp == 1)
     {
-        bnBw = {"100Mbps"};
+        bnBw = {"70Mbps"};
         // bnBw = {"20Mbps"};
         bnDelay = {"2ms"};
         alpha = rateUpInterval / 0.1;     // over the cover period we want
     }
     else if(nGrp == 2)
     {
-        bnBw = {"100Mbps", "100Mbps"};
+        bnBw = {"70Mbps", "70Mbps"};
         bnDelay = {"2ms", "2ms"};
         alpha = rateUpInterval / 0.1; 
     }
@@ -740,6 +744,8 @@ int main (int argc, char *argv[])
     }
 
     // running module construction
+    // LogComponentEnable ("RedQueueDisc", LOG_LEVEL_INFO);        // just for test
+    LogComponentEnable ("DropTailQueue", LOG_LEVEL_INFO);
     LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
     LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);
     cout << "Initializing running module..." << endl;
@@ -771,7 +777,7 @@ int main (int argc, char *argv[])
     // // test pause, resume and disconnect mbox
     // Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
     // Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
-    Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
+    // Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
     // Simulator::Schedule(Seconds(1.01), &RunningModule::resumeMbox, &rm, grps);
 
     // flow monitor

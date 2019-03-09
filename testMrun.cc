@@ -60,9 +60,10 @@ Ipv4Address RunningModule::GetIpv4Addr(uint32_t i, uint32_t id)     // counting 
     return ifc.GetAddress(sender.GetN() + receiver.GetN() + i*2 + (uint32_t)(j - g.routerId.begin()));
 }
 
-RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, uint32_t size)
+RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, bool trackPkt, uint32_t size)
 {
     // constant setting
+    ID = rand() % 10000;
     nSender = 0;
     nReceiver = 0;
     for(Group g:groups)
@@ -78,7 +79,7 @@ RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType p
     bottleneckBw = bnBw;
     bottleneckDelay = bnDelay;
     this->delay = delay;
-
+    isTrackPkt = trackPkt;
 }
 
 RunningModule::~RunningModule(){}
@@ -167,7 +168,7 @@ int main()
 
     // initializing running module
     cout << "Initializing running module ... " << endl;
-    RunningModule rm (t, grps, pt, bnBw, bnDelay, "2ms", 1000);
+    RunningModule rm (t, grps, pt, bnBw, bnDelay, "2ms");
     rm.buildTopology(grps);
 
     // no set queue for this test at first
