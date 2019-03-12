@@ -633,6 +633,9 @@ int main (int argc, char *argv[])
     // specify the TCP socket type in ns-3
     Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));     
     Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue (1400));   
+    Config::SetDefault("ns3::TcpSocket::SndBufSize", UintegerValue(1024 * 1024));      // 128 (KB) by default, allow at most 85Mbps for 12ms rtt
+    Config::SetDefault("ns3::TcpSocket::RcvBufSize", UintegerValue(1024 * 1024));      // here we use 4096 KB
+
     double pSize = 1.4 * 8;         // ip pkt size: 1.4 kbit
 
     // command line parameters: focus on slr and llr threshold first, should display in figure name
@@ -661,14 +664,14 @@ int main (int argc, char *argv[])
     vector<string> bnBw, bnDelay;
     if(nGrp == 1)
     {
-        bnBw = {"70Mbps"};
+        bnBw = {"150Mbps"};
         // bnBw = {"20Mbps"};
         bnDelay = {"2ms"};
         alpha = rateUpInterval / 0.1;     // over the cover period we want
     }
     else if(nGrp == 2)
     {
-        bnBw = {"70Mbps", "70Mbps"};
+        bnBw = {"100Mbps", "100Mbps"};
         bnDelay = {"2ms", "2ms"};
         alpha = rateUpInterval / 0.1; 
     }
@@ -691,10 +694,10 @@ int main (int argc, char *argv[])
     if(nTx == 2 && nGrp == 1) // group: 2*1, 1
     {
         rtid = {5, 6};
-        tx2rate1 = {{1, "100Mbps"}, {2, "200Mbps"}};
+        tx2rate1 = {{1, "200Mbps"}, {2, "200Mbps"}};
         // tx2rate1 = {{1, "0.01Mbps"}, {2, "20Mbps"}};               // for TCP drop debug only!
         rxId1 = {7, 8};
-        rate2port1 = {{"100Mbps", 80}, {"200Mbps", 90}};
+        rate2port1 = {{"200Mbps", 80}, {"200Mbps", 90}};
         // rate2port1 = {{"0.01Mbps", 80}, {"20Mbps", 90}};           // for TCP drop debug only!
         weight = {0.7, 0.3};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);      // skeptical
