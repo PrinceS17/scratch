@@ -633,8 +633,8 @@ int main (int argc, char *argv[])
     // specify the TCP socket type in ns-3
     Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));     
     Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue (1400));   
-    Config::SetDefault("ns3::TcpSocket::SndBufSize", UintegerValue(1024 * 1024));      // 128 (KB) by default, allow at most 85Mbps for 12ms rtt
-    Config::SetDefault("ns3::TcpSocket::RcvBufSize", UintegerValue(1024 * 1024));      // here we use 4096 KB
+    Config::SetDefault("ns3::TcpSocket::SndBufSize", UintegerValue(4096 * 1024));      // 128 (KB) by default, allow at most 85Mbps for 12ms rtt
+    Config::SetDefault("ns3::TcpSocket::RcvBufSize", UintegerValue(4096 * 1024));      // here we use 4096 KB
 
     double pSize = 1.4 * 8;         // ip pkt size: 1.4 kbit
 
@@ -664,7 +664,7 @@ int main (int argc, char *argv[])
     vector<string> bnBw, bnDelay;
     if(nGrp == 1)
     {
-        bnBw = {"150Mbps"};
+        bnBw = {"100Mbps"};
         // bnBw = {"20Mbps"};
         bnDelay = {"2ms"};
         alpha = rateUpInterval / 0.1;     // over the cover period we want
@@ -694,10 +694,10 @@ int main (int argc, char *argv[])
     if(nTx == 2 && nGrp == 1) // group: 2*1, 1
     {
         rtid = {5, 6};
-        tx2rate1 = {{1, "200Mbps"}, {2, "200Mbps"}};
+        tx2rate1 = {{1, "100Mbps"}, {2, "200Mbps"}};
         // tx2rate1 = {{1, "0.01Mbps"}, {2, "20Mbps"}};               // for TCP drop debug only!
         rxId1 = {7, 8};
-        rate2port1 = {{"200Mbps", 80}, {"200Mbps", 90}};
+        rate2port1 = {{"100Mbps", 80}, {"200Mbps", 90}};
         // rate2port1 = {{"0.01Mbps", 80}, {"20Mbps", 90}};           // for TCP drop debug only!
         weight = {0.7, 0.3};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);      // skeptical
@@ -718,9 +718,9 @@ int main (int argc, char *argv[])
     else if(nTx == 3 && nGrp == 1) // group: 3, 1
     {
         rtid = {5, 6};
-        tx2rate1 = {{1, "400Mbps"}, {2, "200Mbps"}, {3, "200Mbps"}};
+        tx2rate1 = {{1, "200Mbps"}, {2, "200Mbps"}, {3, "200Mbps"}};
         rxId1 = {7, 8, 9};
-        rate2port1 = {{"400Mbps", 80}, {"200Mbps", 90}};
+        rate2port1 = {{"200Mbps", 80}, {"200Mbps", 90}};
         // weight = {0.6, 0.2, 0.2};
         weight = {0.6, 0.3, 0.1};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
