@@ -24,6 +24,7 @@
 #include "ns3/packet.h"
 #include "ns3/uinteger.h"
 #include <cstring>
+#include <fstream>
 
 using namespace ns3;
 using namespace std;
@@ -36,7 +37,172 @@ uint32_t cnt2[2] = {0};
 uint32_t cnt3[2] = {0};
 uint32_t cntt[2] = {0};
 
+fstream fout;
 Ptr<PointToPointNetDevice> p2pDev;
+
+
+TypeId 
+MyTag::GetTypeId (void)
+{
+  static TypeId tid = TypeId ("ns3::MyTag")
+    .SetParent<Tag> ()
+    .AddConstructor<MyTag> ()
+    .AddAttribute ("SimpleValue",
+                   "A simple value",
+                   EmptyAttributeValue (),
+                   MakeUintegerAccessor (&MyTag::GetSimpleValue),
+                   MakeUintegerChecker<uint32_t> ())
+  ;
+  return tid;
+}
+TypeId 
+MyTag::GetInstanceTypeId (void) const
+{
+  return GetTypeId ();
+}
+uint32_t 
+MyTag::GetSerializedSize (void) const
+{
+  return 4;
+}
+void 
+MyTag::Serialize (TagBuffer i) const
+{
+  i.WriteU32 (m_simpleValue);
+}
+void 
+MyTag::Deserialize (TagBuffer i)
+{
+  m_simpleValue = i.ReadU32 ();
+}
+void 
+MyTag::Print (std::ostream &os) const
+{
+  os << "v=" << (uint32_t)m_simpleValue;
+}
+void 
+MyTag::SetSimpleValue (uint32_t value)
+{
+  m_simpleValue = value;
+}
+uint32_t 
+MyTag::GetSimpleValue (void) const
+{
+  return m_simpleValue;
+}
+
+//=========================================================================//
+//===============Beigining of Application definition=======================//
+//=========================================================================//
+
+MyApp::MyApp ()
+  : m_socket (0), 
+    m_peer (), 
+    m_packetSize (0), 
+    //m_nPackets (0), 
+    m_dataRate (0), 
+    m_sendEvent (), 
+    m_running (false), 
+    //m_packetsSent (0)
+    m_tagValue (0),
+    m_cnt (0)
+{
+    isTrackPkt = false;
+}
+
+MyApp::~MyApp()
+{
+  m_socket = 0;
+}
+
+void
+//MyApp::Setup (Ptr<Socket> socket, Address address, uint32_t packetSize, uint32_t nPackets, DataRate dataRate)
+MyApp::Setup (Ptr<Socket> socket, Address address, uint32_t packetSize, DataRate dataRate)
+{
+  m_socket = socket;
+  m_peer = address;
+  m_packetSize = packetSize;
+  //m_nPackets = nPackets;
+  m_dataRate = dataRate;
+}
+
+void
+MyApp::SetDataRate(DataRate rate)
+{
+  m_dataRate = rate;
+}
+
+void
+MyApp::SetTagValue(uint32_t value)
+{
+  m_tagValue = value;
+}
+
+void
+MyApp::StartApplication (void)
+{
+  m_running = true;
+  //m_packetsSent = 0;
+  m_socket->Bind ();
+  m_socket->Connect (m_peer);
+  SendPacket ();
+}
+
+void 
+MyApp::StopApplication (void)
+{
+  m_running = false;
+
+  if (m_sendEvent.IsRunning ())
+    {
+      Simulator::Cancel (m_sendEvent);
+    }
+
+  if (m_socket)
+    {
+      m_socket->Close ();
+    }
+}
+
+void 
+MyApp::SendPacket (void)
+{
+  //create the tags
+  MyTag tag;
+  if(!isTrackPkt)  tag.SetSimpleValue (m_tagValue);
+  else   tag.SetSimpleValue (m_tagValue * tagScale + ++m_cnt);
+  stringstream ss;
+  ss << "- Tx: " << m_tagValue - 1 << ". " << m_cnt;
+//   NS_LOG_INFO(ss.str());
+
+  Ptr<Packet> packet = Create<Packet> (m_packetSize);
+  packet -> AddPacketTag (tag); //add tags
+  m_socket->Send (packet);
+
+  // for debug only
+//   NS_LOG_INFO(" socket for " + to_string(m_tagValue - 1) + ": sending pkt, cnt = " + to_string(m_cnt));
+  ScheduleTx ();
+}
+
+void 
+MyApp::ScheduleTx (void)
+{
+  if (m_running)
+    {
+      Time tNext (Seconds (m_packetSize * 8 / static_cast<double> (m_dataRate.GetBitRate ())));
+      m_sendEvent = Simulator::Schedule (tNext, &MyApp::SendPacket, this);
+    }
+}
+
+Ptr<Socket> MyApp::GetSocket()
+{
+    return m_socket;
+}
+//=========================================================================//
+//===================End of Application definition=========================//
+//=========================================================================//
+
+
 
 void handler(QueueDiscContainer qDisc)
 {
@@ -66,6 +232,7 @@ void
 TcPktInQ(uint32_t vOld, uint32_t vNew)
 {
     cout << "Tc packet in queue: " << vNew << endl;
+    fout << Simulator::Now().GetSeconds() << " " << vNew << endl;
 }
 
 void
@@ -164,12 +331,16 @@ void QueueDrop(Ptr<const QueueDiscItem> qi)
 int
 main(int argc, char *argv[])
 {
-    string cRate = "2Mbps";
-    string bRate = "500kbps";
+    string cRate = "20Mbps";
+    string bRate = "5Mbps";
     string bDelay = "2ms";
-    double tStop = 15.0;
+    double tStop = 50.0;
     string qType = "RED";
-    uint16_t port = 5001;
+    uint16_t port = 8080;
+    string fname = "REDout.dat";
+
+    remove(fname.c_str());
+    fout.open(fname, ios::app | ios::out);
 
     CommandLine cmd;
     cmd.AddValue("cRate", "Data rate of client", cRate);
@@ -189,7 +360,7 @@ main(int argc, char *argv[])
     // p2p.SetQueue("ns3::DropTailQueue", "MaxSize", StringValue("1p"));
 
     PointToPointHelper leaf;
-    leaf.SetDeviceAttribute("DataRate", StringValue("100Mbps"));
+    leaf.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
     leaf.SetChannelAttribute("Delay", StringValue("1ms"));
 
     PointToPointDumbbellHelper d (2, leaf, 2, leaf, p2p);
@@ -264,7 +435,7 @@ main(int argc, char *argv[])
     q->TraceConnectWithoutContext("Drop", MakeCallback(&QueueDrop));
     q->TraceConnectWithoutContext("EnQueue", MakeCallback(&QueueOp));   // not fired
     // q->TraceConnectWithoutContext("DeQueue", MakeCallback(&QueueOp));   // not fired
-    // q->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&TcPktInQ));
+    q->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&TcPktInQ));
 
     // set simulation
     Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
@@ -274,13 +445,14 @@ main(int argc, char *argv[])
 
     // stats
     QueueDisc::Stats st = qDiscs.Get(0)->GetStats();
-    st.Print(cout);
+    // st.Print(cout);
     if (st.GetNDroppedPackets (RedQueueDisc::UNFORCED_DROP) == 0)
         cout << "There should be some unforced drops" << endl;
     if (st.GetNDroppedPackets (QueueDisc::INTERNAL_QUEUE_DROP) != 0)
         cout << "There should be zero drops due to queue full" << endl;
 
     // end
+    fout.close();
     cout << "\nDestroying the simulation..." << endl;
     Simulator::Destroy();
     return 0;

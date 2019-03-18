@@ -235,8 +235,13 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     // connectMbox(groups, 0.06, 0.5);       // good for LLR and SLR method
     // connectMbox(groups, 0.096, 0.5);     // bad for EBRC
 
+    // for debug only
+    Ptr<NetDevice> txRouter = GetRouter(0, true)->GetDevice(0);
+    Ptr<PointToPointNetDevice> p2pdev = DynamicCast<PointToPointNetDevice> (txRouter);
     stringstream ss;
-    ss << "\n\n\nQueue type: " << qc.Get(0)->GetTypeId();
+    ss << "\n\n\nQueue type: " << qc.Get(0)->GetTypeId() << endl;
+    ss << " - Dev qmax: " << p2pdev->GetQueue()->GetMaxSize() << endl << " - Tc qmax: " << qc.Get(0)->GetMaxSize() << endl;
+
     NS_LOG_INFO( ss.str() );
 }
 
@@ -250,6 +255,8 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
     {
         TrafficControlHelper tch;
         if(Th.empty()) tch.SetRootQueueDisc("ns3::RedQueueDisc", 
+                                            "MinTh", DoubleValue(5),
+                                            "MaxTh", DoubleValue(15),
                                             "LinkBandwidth", StringValue(bnBw.at(i)),
                                             "LinkDelay", StringValue(bnDelay.at(i)));
         else tch.SetRootQueueDisc("ns3::RedQueueDisc",
@@ -257,7 +264,15 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
                                 "MaxTh", DoubleValue(Th.at(1)),
                                 "LinkBandwidth", StringValue(bnBw.at(i)),
                                 "LinkDelay", StringValue(bnDelay.at(i)));
-        qc.Add(tch.Install(GetNode(i, grp.at(i).routerId[0])->GetDevice(0)));
+
+        // qc.Add(tch.Install(GetNode(i, grp.at(i).routerId[0])->GetDevice(0)));
+        Ptr<NetDevice> txRouter = GetRouter(i, true)->GetDevice(0);
+        Ptr<NetDevice> rxRouter = GetRouter(i, false)->GetDevice(0);
+        qc.Add(tch.Install(txRouter));
+        // tch.Install(rxRouter);
+        cout << "type id of queue: " << qc.Get(0)->GetInstanceTypeId() << endl;
+
+        // qc.Add(tch.Install(GetNode(i, grp.at(i).routerId[1])->GetDevice(0)));
         // qc.Add(tch.Install(router.Get(2*i)->GetDevice(0)));       // sender's router queue needed only
     }
 
@@ -403,7 +418,7 @@ Ptr<MyApp> RunningModule::netFlow(uint32_t i, uint32_t tId, uint32_t rId, uint32
     Ptr<MyApp> app = CreateObject<MyApp> ();
     app->isTrackPkt = isTrackPkt;
     app->SetTagValue(tag);
-    app->Setup(skt, sinkAddr, pktSize, rate);
+    app->Setup(skt, sinkAddr, pktSize, DataRate(rate));
     GetNode(i, tId)->AddApplication(app);
 
     // logging
@@ -459,10 +474,15 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         }
 
         rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes.at(i)));
-        // qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
+        qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
         
         txRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMboxAck, &mboxes.at(i)));    // should be tested
     
+
+        // record the queue length to debug the first drop 
+        qc.Get(i)->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::TcPktInQ, &mboxes.at(i)));
+        Ptr<Queue<Packet>> qp = DynamicCast<PointToPointNetDevice> (txRouter) -> GetQueue();
+        qp->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::DevPktInQ, &mboxes.at(i)));
 
         // trace TCP congestion window and RTT : need testing
         for(uint32_t j = 0; j < groups.at(i).txId.size(); j ++)
@@ -629,12 +649,17 @@ int main (int argc, char *argv[])
     uint32_t MID1 = 0;
     uint32_t MID2 = 0;
     double alpha;
+    uint32_t maxPkts = 1;
 
     // specify the TCP socket type in ns-3
     Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));     
     Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue (1400));   
     Config::SetDefault("ns3::TcpSocket::SndBufSize", UintegerValue(4096 * 1024));      // 128 (KB) by default, allow at most 85Mbps for 12ms rtt
     Config::SetDefault("ns3::TcpSocket::RcvBufSize", UintegerValue(4096 * 1024));      // here we use 4096 KB
+    // Config::SetDefault ("ns3::RedQueueDisc::MaxSize",
+                        //   QueueSizeValue (QueueSize (QueueSizeUnit::PACKETS, 25)));  // set the unit to packet but not byte
+    Config::SetDefault ("ns3::RedQueueDisc::MaxSize", StringValue ("1000p"));
+    Config::SetDefault ("ns3::QueueBase::MaxSize", StringValue (std::to_string (maxPkts) + "p"));
 
     double pSize = 1.4 * 8;         // ip pkt size: 1.4 kbit
 
@@ -664,7 +689,7 @@ int main (int argc, char *argv[])
     vector<string> bnBw, bnDelay;
     if(nGrp == 1)
     {
-        bnBw = {"100Mbps"};
+        bnBw = {"200Mbps"};
         // bnBw = {"20Mbps"};
         bnDelay = {"2ms"};
         alpha = rateUpInterval / 0.1;     // over the cover period we want
@@ -694,10 +719,10 @@ int main (int argc, char *argv[])
     if(nTx == 2 && nGrp == 1) // group: 2*1, 1
     {
         rtid = {5, 6};
-        tx2rate1 = {{1, "100Mbps"}, {2, "200Mbps"}};
+        tx2rate1 = {{1, "200Mbps"}, {2, "200Mbps"}};
         // tx2rate1 = {{1, "0.01Mbps"}, {2, "20Mbps"}};               // for TCP drop debug only!
         rxId1 = {7, 8};
-        rate2port1 = {{"100Mbps", 80}, {"200Mbps", 90}};
+        rate2port1 = {{"200Mbps", 80}, {"200Mbps", 90}};
         // rate2port1 = {{"0.01Mbps", 80}, {"20Mbps", 90}};           // for TCP drop debug only!
         weight = {0.7, 0.3};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);      // skeptical
