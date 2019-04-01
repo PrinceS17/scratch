@@ -505,16 +505,16 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
             txNode->GetDevice(j)->TraceConnectWithoutContext("PhyRxDrop", MakeCallback(&MiddlePoliceBox::onPhyRxDrop, &mboxes.at(i)));
 
         // for debug: test the sender's ack and mactx
-        for(uint32_t j = 0; j < grp.at(i).txId.size(); j ++)
-        {
-            stringstream ss;
-            Ptr<NetDevice> tx0 = GetNode(i, grp.at(i).txId.at(j))->GetDevice(0);
-            Ptr<NetDevice> tx1 = GetNode(i, grp.at(i).txId.at(j))->GetDevice(1);
-            ss << "TX[0] address: " << tx0->GetAddress() << ";\nTX[1] address: " << tx1->GetAddress();
-            NS_LOG_INFO(ss.str());
-            tx0->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onAckRx, &mboxes.at(i)));
-            tx0->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onSenderTx, &mboxes.at(i)));
-        }
+        // for(uint32_t j = 0; j < grp.at(i).txId.size(); j ++)
+        // {
+        //     stringstream ss;
+        //     Ptr<NetDevice> tx0 = GetNode(i, grp.at(i).txId.at(j))->GetDevice(0);
+        //     Ptr<NetDevice> tx1 = GetNode(i, grp.at(i).txId.at(j))->GetDevice(1);
+        //     ss << "TX[0] address: " << tx0->GetAddress() << ";\nTX[1] address: " << tx1->GetAddress();
+        //     NS_LOG_INFO(ss.str());
+        //     tx0->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onAckRx, &mboxes.at(i)));
+        //     tx0->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onSenderTx, &mboxes.at(i)));
+        // }
 
         // for debug: test every drop, router 2
             // should also connect this phyRxDrop for the link?
@@ -638,7 +638,7 @@ int main (int argc, char *argv[])
     ProtocolType pt = TCP;
     FairType fairness = PRIORITY;
     bool isTrackPkt = false;
-    bool isEbrc = true;
+    bool isEbrc = false;            // don't use EBRC now, but also want to use loss assignment
     bool isTax = true;              // true: scheme 1, tax; false: scheme 2, counter
     uint32_t nTx = 2;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
@@ -659,6 +659,7 @@ int main (int argc, char *argv[])
     // Config::SetDefault ("ns3::RedQueueDisc::MaxSize",
                         //   QueueSizeValue (QueueSize (QueueSizeUnit::PACKETS, 25)));  // set the unit to packet but not byte
     Config::SetDefault ("ns3::RedQueueDisc::MaxSize", StringValue ("1000p"));
+    // Config::SetDefault ("ns3::RedQueueDisc::LInterm", DoubleValue (10));              // default 50 -> prob = 0.02, low
     Config::SetDefault ("ns3::QueueBase::MaxSize", StringValue (std::to_string (maxPkts) + "p"));
 
     double pSize = 1.4 * 8;         // ip pkt size: 1.4 kbit
@@ -689,7 +690,7 @@ int main (int argc, char *argv[])
     vector<string> bnBw, bnDelay;
     if(nGrp == 1)
     {
-        bnBw = {"200Mbps"};
+        bnBw = {"120Mbps"};
         // bnBw = {"20Mbps"};
         bnDelay = {"2ms"};
         alpha = rateUpInterval / 0.1;     // over the cover period we want
@@ -776,6 +777,8 @@ int main (int argc, char *argv[])
     LogComponentEnable ("DropTailQueue", LOG_LEVEL_INFO);
     LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
     LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);
+    // LogComponentEnable("TcpTxBuffer", LOG_LEVEL_ALL);
+    // LogComponentEnable("Ipv4L3Protocol", LOG_LEVEL_ALL);
     cout << "Initializing running module..." << endl;
     RunningModule rm(t, grps, pt, bnBw, bnDelay, "2ms", isTrackPkt, 1000);
     cout << "Building topology ... " << endl;
@@ -805,7 +808,7 @@ int main (int argc, char *argv[])
     // // test pause, resume and disconnect mbox
     // Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
     // Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
-    // Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
+    // Simulator::Schedule(Seconds(0.05), &RunningModule::pauseMbox, &rm, grps);
     // Simulator::Schedule(Seconds(1.01), &RunningModule::resumeMbox, &rm, grps);
 
     // flow monitor
