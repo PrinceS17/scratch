@@ -12,6 +12,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * 
+ * Author: Jinhui Song<jinhuis2@illinois.edu>
  */
 
 #ifndef MRUN_H
@@ -32,7 +34,7 @@ class Group
 {
 public:
     Group() = default;
-    Group(vector<uint32_t> rtid, map<uint32_t, string> tx2rate1, vector<uint32_t> rxId1, map<string, uint32_t> rate2port1):
+    Group(vector<uint32_t> rtid, map<uint32_t, string> tx2rate1, vector<uint32_t> rxId1, map<string, uint32_t> rate2port1, vector<double> w = vector<double>()):
         routerId(rtid), tx2rate(tx2rate1), rxId(rxId1), rate2port(rate2port1)
         {
             // some direct visit exist? no at least from stackoverflow
@@ -52,6 +54,9 @@ public:
             }
 
             N = txId.size() + rxId.size() + 2;
+
+            if(w.size() > 0) weight = w;
+            else weight = vector<double> (txId.size(), 1.0 / (double)txId.size());
 
             for(pair<string, uint32_t> pid:rate2port)
             {
@@ -89,11 +94,12 @@ public:
     vector<string> rates;       // collection all rate in this group
     vector<uint32_t> ports;
 
+    multimap <uint32_t, uint32_t> tx2rx;        // tx-rx node map: m-in-n-out map, test m!=n in later version
+    map <string, vector<uint32_t>> rate2tx;     // sort each node by its data rate (like client, attacker before)
+    map <uint32_t, string> tx2rate;             // tx node to rate
+    map <string, uint32_t> rate2port;           // port for every rate level (abstract for client and attacker)
 
-    multimap <uint32_t, uint32_t> tx2rx;      // tx-rx node map: m-in-n-out map, test m!=n in later version
-    map <string, vector<uint32_t>> rate2tx;   // sort each node by its data rate (like client, attacker before)
-    map <uint32_t, string> tx2rate;        // tx node to rate
-    map <string, uint32_t> rate2port;     // port for every rate level (abstract for client and attacker)
+    vector <double> weight;                     // weight for each sender (current version)
 };
 
 class RunningModule
@@ -112,7 +118,7 @@ public:
      * for three groups.
      * \param size Packet size, 1000 kB by default.
      */
-    RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, uint32_t size = 1000);
+    RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, bool trackPkt = false, uint32_t size = 1000);
     ~RunningModule ();
     /**
      * \brief Build the network topology from link (p2p) to network layer (stack). p2p link 
@@ -147,6 +153,17 @@ public:
      * \returns A queue disc container on router that we are interested in.
      */
     QueueDiscContainer setQueue(vector<Group> grp, vector<string> bw, vector<string> delay, vector<double> Th=vector<double>());
+    /**
+     * \brief Set prio queue (2 RED), one for priviledged. No use now.
+     * 
+     * \param grp Vector including node group with rate level.
+     * \param Th In format [MinTh, MaxTh], if empty, then use ns-3 default.
+     * \param bw Bottleneck Link bandwidth collection.
+     * \param delay Bottleneck link delay.
+     * 
+     * \returns A queue disc container on router that we are interested in.
+     */
+    // QueueDiscContainer setPrioQueue(vector<Group> grp, vector<string> bw, vector<string> delay, vector<double> Th=vector<double>());
     /**
      * \brief Set the address for sender, receiver and router.
      * 
@@ -185,33 +202,30 @@ public:
     /**
      * \brief Connect to the installed mboxes and begin tracing.
      * 
-     * \param mboxes Mboxes that installed on the routers.
      * \param grp Node group with rate level.
      * \param interval Interval of mbox's detection.
      * \param logInterval Interval of mbox's logging for e.g. data rate, llr, slr.
+     * \param ruInterval Interval for real time tx & Ebrc rate update.
      */
-    void connectMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp, double interval, double logInterval);
+    void connectMbox(vector<Group> grp, double interval, double logInterval, double ruInterval);
     /**
      * \brief Stop the installed mboxes and disconnect the tracing.
      * 
-     * \param mboxes Mboxes that installed on the routers.
      * \param grp Node group with rate level.
      */
-    void disconnectMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp);
+    void disconnectMbox(vector<Group> grp);
     /**
      * \brief Pause the mbox, i.e. stop control (early drop) but continue detecting packets.
      * 
-     * \param mboxes Mboxes that installed on the routers.
      * \param grp Node group with rate level.
      */
-    void pauseMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp);
+    void pauseMbox(vector<Group> grp);
     /**
      * \brief Resume the mbox, i.e. continue to both detect and drop the packets.
      * 
-     * \param mboxes Mboxes that installed on the routers.
      * \param grp Node group with rate level.
      */
-    void resumeMbox(vector<MiddlePoliceBox>& mboxes, vector<Group> grp);
+    void resumeMbox(vector<Group> grp);
     /**
      * \brief Start all the application from Now() and also start the mbox detection by tracing.
      */
@@ -256,6 +270,9 @@ public:
      */
     Ipv4Address GetIpv4Addr(uint32_t i, uint32_t id);
     void txSink(Ptr<const Packet> p);   // !< for test and debug
+    void onCwndChange(string context, uint32_t oldValue, uint32_t newValue);
+    uint32_t GetId();
+    // static void onCwndChangeWo(uint32_t oldValue, uint32_t newValue);
     
 public:         // network entity
     NodeContainer nodes;        // all nodes in the topology
@@ -269,9 +286,11 @@ public:         // network entity
     vector< Ptr<MyApp> > senderApp;   // sender app: need testing!
 
     vector<PointToPointDumbbellHelper> dv;  // use to preserve channel information
+    vector<MiddlePoliceBox> mboxes;         // use to make the mboxes consistent
 
 private:        // parameters
     // basic
+    uint32_t ID;
     uint32_t nSender;
     uint32_t nReceiver;
     vector<Group> groups;       // group node by different mbox: need testing such vector declaration
@@ -293,6 +312,9 @@ private:        // parameters
     vector<string> bottleneckDelay = vector<string>();
     string delay;
     string mtu = "1599";        // p2p link setting
+
+    bool isTrackPkt;
+    vector<string> fnames;
 
 };
 

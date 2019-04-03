@@ -122,7 +122,7 @@ Ipv4Address RunningModule::GetIpv4Addr(uint32_t i, uint32_t id)     // counting 
 uint32_t RunningModule::GetId()
 {   return ID; }
 
-RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, bool trackPkt, uint32_t size)
+RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, vector<bool> fls, uint32_t size)
 {
     // constant setting
     ID = rand() % 10000;
@@ -141,7 +141,8 @@ RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType p
     bottleneckBw = bnBw;
     bottleneckDelay = bnDelay;
     this->delay = delay;
-    isTrackPkt = trackPkt;
+    isTrackPkt = fls.at(0);
+    bypassMacRx = fls.at(1);
 }
 
 RunningModule::~RunningModule(){}
@@ -223,26 +224,9 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     ifc = setAddress();
     sinkApp = setSink(groups, protocol);
     senderApp = setSender(groups, protocol);
-    cout << "m size: " << mboxes.size() << endl;
     this->mboxes = mboxes;
-    // for(uint32_t i = 0; i < mboxes.size(); i ++)
-    //     this->mboxes.push_back(mboxes.at(i));
-    // manually set here
-    // connectMbox(groups, 0.012, 0.5);      // 0.012: rtt, rate switches between node 0/1
-    // connectMbox(groups, 0.015, 0.5);      // 0.015: not fine either, seems we need to test average RTT...
     connectMbox(groups, controlInterval, 0.2, rateUpInterval);        // not work either
-
-    // connectMbox(groups, 0.06, 0.5);       // good for LLR and SLR method
-    // connectMbox(groups, 0.096, 0.5);     // bad for EBRC
-
-    // for debug only
-    Ptr<NetDevice> txRouter = GetRouter(0, true)->GetDevice(0);
-    Ptr<PointToPointNetDevice> p2pdev = DynamicCast<PointToPointNetDevice> (txRouter);
-    stringstream ss;
-    ss << "\n\n\nQueue type: " << qc.Get(0)->GetTypeId() << endl;
-    ss << " - Dev qmax: " << p2pdev->GetQueue()->GetMaxSize() << endl << " - Tc qmax: " << qc.Get(0)->GetMaxSize() << endl;
-
-    NS_LOG_INFO( ss.str() );
+    
 }
 
 QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
@@ -278,26 +262,6 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
 
     return qc;
 }
-
-// QueueDiscContainer RunningModule::setPrioQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
-// {
-//     NS_LOG_FUNCTION("Begin Prio Queue.");
-//     QueueDiscContainer qc;
-//     for(uint32_t i = 0; i < grp.size(); i ++)
-//     {
-//         TrafficControlHelper tch;
-//         uint32_t handle = tch.SetRootQueueDisc("ns3::PrioQueueDisc", "Priomap", StringValue("0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1"));
-//         TrafficControlHelper::ClassIdList cid = tch.AddQueueDiscClasses(handle, 2, "ns3::QueueDiscClass");
-//         tch.AddChildQueueDisc(handle, cid[0], "ns3::RedQueueDisc");
-//         tch.AddChildQueueDisc(handle, cid[1], "ns3::RedQueueDisc");
-//         tch.AddPacketFilter(handle, "ns3::PrioQueueDiscTestFilter");
-
-//         // how to return the packet filter to update rwnd / cwnd??
-//     }
-
-//     return qc;
-
-// }
 
 Ipv4InterfaceContainer RunningModule::setAddress()
 {
@@ -391,7 +355,6 @@ vector< Ptr<MyApp> > RunningModule::setSender(vector<Group> grp, ProtocolType pt
                 uint32_t tag = (uint32_t)(it2 - g.txId.begin()) + 1;
                 cout << "RX id: " << it->second << "; Tag : " << tag << "; " << tId << " -> " << it->second << endl;
                 appc.push_back(netFlow(i, tId, it->second, tag));
-                // test output
             }
         }
     }
@@ -444,7 +407,6 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
             nc.Add(txNode->GetDevice(j));               // add rx side devices
 
         // install mbox
-        bool bypassMacRx = true;
         if(bypassMacRx) mboxes.at(i).install(txRouter);     // install only the router net dev for bottleneck link
         else mboxes.at(i).install(nc);                      // install probes for all tx router's mac rx side
 
@@ -474,9 +436,8 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         }
 
         rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes.at(i)));
-        qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
-        
-        txRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMboxAck, &mboxes.at(i)));    // should be tested
+        // qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
+        txRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMboxAck, &mboxes.at(i)));    // test passeds
     
 
         // record the queue length to debug the first drop 
@@ -484,50 +445,19 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         Ptr<Queue<Packet>> qp = DynamicCast<PointToPointNetDevice> (txRouter) -> GetQueue();
         qp->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::DevPktInQ, &mboxes.at(i)));
 
-        // trace TCP congestion window and RTT : need testing
+        // trace TCP congestion window and RTT: tested
         for(uint32_t j = 0; j < groups.at(i).txId.size(); j ++)
         {
             string context1 = "/NodeList/0/$ns3::TcpL4Protocol/SocketList/" + to_string(j) + "/CongestionWindow";
             string context2 = "/NodeList/0/$ns3::TcpL4Protocol/SocketList/" + to_string(j) + "/RTT";
-            // Config::Connect(context1, MakeCallback(&MiddlePoliceBox::onCwndChange, &mboxes.at(i)));
-            // Config::Connect(context2, MakeCallback(&MiddlePoliceBox::onRttChange, &mboxes.at(i)));
-            
-            // wrong actually! only works for limited cases : all groups have same size!
-            Ptr<Socket> skt = senderApp.at(i * groups[0].N + j)->GetSocket();
+
+            Ptr<Socket> skt = senderApp.at(i * groups[0].N + j)->GetSocket();       // maybe limited for different groups
             skt->TraceConnect("CongestionWindow", context1, MakeCallback(&MiddlePoliceBox::onCwndChange, &mboxes.at(i)));
             skt->TraceConnect("RTT", context2, MakeCallback(&MiddlePoliceBox::onRttChange, &mboxes.at(i)));
         }
 
-        // reduntant: for debug only
-        txRouter->TraceConnectWithoutContext("MacTxDrop", MakeCallback(&MiddlePoliceBox::onMacTxDrop, &mboxes.at(i)));
-        txRouter->TraceConnectWithoutContext("PhyTxDrop", MakeCallback(&MiddlePoliceBox::onPhyTxDrop, &mboxes.at(i)));
-        for(uint32_t j = 0; j < txNode->GetNDevices(); j ++)
-            txNode->GetDevice(j)->TraceConnectWithoutContext("PhyRxDrop", MakeCallback(&MiddlePoliceBox::onPhyRxDrop, &mboxes.at(i)));
-
-        // for debug: test the sender's ack and mactx
-        // for(uint32_t j = 0; j < grp.at(i).txId.size(); j ++)
-        // {
-        //     stringstream ss;
-        //     Ptr<NetDevice> tx0 = GetNode(i, grp.at(i).txId.at(j))->GetDevice(0);
-        //     Ptr<NetDevice> tx1 = GetNode(i, grp.at(i).txId.at(j))->GetDevice(1);
-        //     ss << "TX[0] address: " << tx0->GetAddress() << ";\nTX[1] address: " << tx1->GetAddress();
-        //     NS_LOG_INFO(ss.str());
-        //     tx0->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onAckRx, &mboxes.at(i)));
-        //     tx0->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onSenderTx, &mboxes.at(i)));
-        // }
-
-        // for debug: test every drop, router 2
-            // should also connect this phyRxDrop for the link?
-        Ptr<Node> rtNode = GetRouter(i, false);         // just for debug
-        rxRouter->TraceConnectWithoutContext("PhyRxDrop", MakeCallback(&MiddlePoliceBox::onPhyRxDrop2, &mboxes.at(i)));
-        rxRouter->TraceConnectWithoutContext("PhyRx", MakeCallback(&MiddlePoliceBox::onPhyRxDrop2, &mboxes.at(i)));
-        for(uint32_t j = 0; j < grp.at(i).rxId.size(); j ++)
-        {
-            Ptr<NetDevice> rx0 = rtNode->GetDevice(j + 1);  
-            rx0->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTxDrop2, &mboxes.at(i)) );
-            rx0->TraceConnectWithoutContext("PhyTx", MakeCallback(&MiddlePoliceBox::onPhyTxDrop2, &mboxes.at(i)) );
-        }
         // test the rx side device index
+        Ptr<Node> rtNode = GetRouter(i, false);
         cout << " rx0: # dev: " << rtNode->GetNDevices() << "; # rx: " << grp.at(i).rxId.size() << endl;
         for(uint32_t k = 0; k < rtNode->GetNDevices(); k ++)
         {
@@ -535,20 +465,22 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
             cout << " -- rx end[" << k << "] addr: " << GetNode(i, grp.at(i).rxId[k])->GetDevice(0)->GetAddress() << endl;
         }            
 
+        // for debug chain 1
+        for(uint32_t k = 0; k < grp.at(i).txId.size(); k ++)
+        {
+            Ptr<NetDevice> senderNode = dv.at(i).GetLeft(k)->GetDevice(0);
+            senderNode->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onSenderTx, &mboxes.at(i)));
+            senderNode->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onAckRx, &mboxes.at(i)));
+        }
+
+
         // flow control
         mboxes.at(i).flowControl(mboxes.at(i).GetFairness(), interval, logInterval, ruInterval);
-        
-        // for test only
-        stringstream ss;
-        ss << "Queue size: " << qc.Get(i)->GetNPackets();
-        NS_LOG_INFO(ss.str());
-
     }
 }
 
 void RunningModule::disconnectMbox(vector<Group> grp)
 {
-    // for debug only
     NS_LOG_INFO("Disconnect Mbox ... ");
 
     for(uint32_t i = 0; i < grp.size(); i ++)
@@ -640,7 +572,8 @@ int main (int argc, char *argv[])
     bool isTrackPkt = false;
     bool isEbrc = false;            // don't use EBRC now, but also want to use loss assignment
     bool isTax = true;              // true: scheme 1, tax; false: scheme 2, counter
-    uint32_t nTx = 2;               // sender number, i.e. link number
+    bool isBypass = true;
+    uint32_t nTx = 3;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
     vector<double> Th;              // threshold of slr/llr
     double slrTh = 0.01;
@@ -650,6 +583,7 @@ int main (int argc, char *argv[])
     uint32_t MID2 = 0;
     double alpha;
     uint32_t maxPkts = 1;
+    double scale = 5e3;
 
     // specify the TCP socket type in ns-3
     Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));     
@@ -658,8 +592,8 @@ int main (int argc, char *argv[])
     Config::SetDefault("ns3::TcpSocket::RcvBufSize", UintegerValue(4096 * 1024));      // here we use 4096 KB
     // Config::SetDefault ("ns3::RedQueueDisc::MaxSize",
                         //   QueueSizeValue (QueueSize (QueueSizeUnit::PACKETS, 25)));  // set the unit to packet but not byte
-    Config::SetDefault ("ns3::RedQueueDisc::MaxSize", StringValue ("1000p"));
-    // Config::SetDefault ("ns3::RedQueueDisc::LInterm", DoubleValue (10));              // default 50 -> prob = 0.02, low
+    Config::SetDefault ("ns3::RedQueueDisc::MaxSize", StringValue ("25p"));
+    Config::SetDefault ("ns3::RedQueueDisc::LInterm", DoubleValue (10));              // default 50 -> prob = 0.02, low
     Config::SetDefault ("ns3::QueueBase::MaxSize", StringValue (std::to_string (maxPkts) + "p"));
 
     double pSize = 1.4 * 8;         // ip pkt size: 1.4 kbit
@@ -702,15 +636,10 @@ int main (int argc, char *argv[])
         alpha = rateUpInterval / 0.1; 
     }
 
-    // // for copy constructor test only
-    // cout << "Is MiddlePoliceBox move_constructible? " << is_move_constructible<MiddlePoliceBox>::value << endl;
-    // cout << "Is MiddlePoliceBox move assignable? " << is_move_assignable<MiddlePoliceBox>::value << endl;
-    // cout << "Is MiddlePoliceBox default_constructible? " << is_default_constructible<MiddlePoliceBox>::value << endl;
-    // cout << "Is MiddlePoliceBox copy_constructible? " << is_copy_constructible<MiddlePoliceBox>::value << endl;
-
     // generating groups
     cout << "Generating groups of nodes ... " << endl;
     vector<double> weight;
+    vector<uint32_t> txId1;
     vector<uint32_t> rtid, rtid2, rxId1, rxId2;
     map<uint32_t, string> tx2rate1, tx2rate2;
     map<string, uint32_t> rate2port1, rate2port2;
@@ -771,16 +700,45 @@ int main (int argc, char *argv[])
         g2.insertLink({10, 12}, {2, 4});
         grps = {g1, g2};
     }
+    else if(nTx == 10)
+    {
+        rtid = {95, 96};
+        for(int i = 0; i < 10; i ++)
+        {
+            tx2rate1[i] = "100Mbps";
+            txId1.push_back(i);
+            rxId1.push_back(i + 10);
+        }
+        rate2port1 = {{"100Mbps", 80}};
+        weight = {0.5, 0.055, 0.055, 0.055, 0.055, 0.056, 0.056, 0.056, 0.056, 0.056}; 
+        g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
+        g1.insertLink(txId1, rxId1);
+        grps = {g1};
+        scale = 1e3;
+    }
+    else if (nGrp == 1)
+    {
+        rtid = {95, 96};
+        for(int i = 0; i < nTx; i ++)
+        {
+            tx2rate1[i] = "100Mbps";
+            txId1.push_back(i);
+            rxId1.push_back(i + nTx);
+        }
+        rate2port1 = {{"100Mbps", 80}};
+        weight.push_back(0.5);
+        for(int i = 0; i < nTx - 1; i ++)
+            weight.push_back(0.5 / (nTx - 1) );
+        g1.insertLink(txId1, rxId1);
+        grps = {g1};
+        scale = 1e3;
+    }
 
     // running module construction
-    // LogComponentEnable ("RedQueueDisc", LOG_LEVEL_INFO);        // just for test
-    LogComponentEnable ("DropTailQueue", LOG_LEVEL_INFO);
     LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
     LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);
-    // LogComponentEnable("TcpTxBuffer", LOG_LEVEL_ALL);
-    // LogComponentEnable("Ipv4L3Protocol", LOG_LEVEL_ALL);
     cout << "Initializing running module..." << endl;
-    RunningModule rm(t, grps, pt, bnBw, bnDelay, "2ms", isTrackPkt, 1000);
+    RunningModule rm(t, grps, pt, bnBw, bnDelay, "2ms", {isTrackPkt, isBypass}, 1000);
     cout << "Building topology ... " << endl;
     rm.buildTopology(grps);
 
@@ -789,18 +747,23 @@ int main (int argc, char *argv[])
     // vector<MiddlePoliceBox> mboxes;
     MiddlePoliceBox mbox1, mbox2;
     double beta = 0.98;
-    if(nGrp == 1 && nTx == 4)
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{4,4,2,2}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax}, alpha);    
-    else if(nGrp == 1 && nTx == 3)
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{3,3,2,1}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax}, alpha);         // vector{nSender, nReceiver, nClient, nAttacker}
-    else
-        mbox1 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax}, alpha);         // vector{nSender, nReceiver, nClient, nAttacker}
-    // limitation: mbox could only process 2 rate level!
+    vector<uint32_t> num;
+    if(nGrp == 1 && nTx == 4)           // limitation: current mbox could only process 2 rate level!
+        num = vector<uint32_t> {4,4,2,2};
+    else if(nGrp == 1 && nTx == 3) 
+        num = vector<uint32_t> {3,3,2,1};
+    else if(nTx == 10) 
+        num = vector<uint32_t> {10,10,1,9};
+    else if(nTx == 2)
+        num = vector<uint32_t> {2,2,1,1};
+    else if(nGrp == 1)
+        num = vector<uint32_t> {nTx, nTx, 1, nTx - 1};
+    mbox1 = MiddlePoliceBox(num, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax, isBypass}, alpha, scale);         // vector{nSender, nReceiver, nClient, nAttacker}
 
     vector<MiddlePoliceBox> mboxes({mbox1});
     if(nGrp == 2) 
     {
-        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID2, 50, {isEbrc, isTax}, alpha);
+        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID2, 50, {isEbrc, isTax, isBypass}, alpha, scale);
         mboxes.push_back(mbox2);
     }
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
