@@ -118,7 +118,7 @@ public:
      * for three groups.
      * \param size Packet size, 1000 kB by default.
      */
-    RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, bool trackPkt = false, uint32_t size = 1000);
+    RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, vector<bool> fls = {false, true}, uint32_t size = 1000);
     ~RunningModule ();
     /**
      * \brief Build the network topology from link (p2p) to network layer (stack). p2p link 
@@ -299,6 +299,8 @@ private:        // parameters
     uint32_t u;                 // unit size of group leaves
     double rtStart;             // start time of this run (the initial one)
     double rtStop;              // stop time of this run
+    vector<double> txStart;     // start time of TX flows 
+    vector<double> txEnd;       // end time of Tx flows
     ProtocolType protocol;
     
     // queue
@@ -314,6 +316,7 @@ private:        // parameters
     string mtu = "1599";        // p2p link setting
 
     bool isTrackPkt;
+    bool bypassMacRx;
     vector<string> fnames;
 
 };

@@ -128,15 +128,24 @@ RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType p
     ID = rand() % 10000;
     nSender = 0;
     nReceiver = 0;
+    groups = grp;
     for(Group g:groups)
     {
         nSender += g.txId.size();
         nReceiver += g.rxId.size();
     }
-    groups = grp;
     pktSize = size;
     rtStart = t.at(0);
     rtStop = t.at(1);
+
+    for(uint32_t i = 0; i < nSender; i ++)
+    {
+        txStart.push_back(t.at(i + 2));
+        txEnd.push_back(t.at(i + nSender + 2));
+    }
+    for (auto e:txStart) cout << e << ' ';
+    cout << "tx Start pushed!" << endl;
+
     protocol = pt;
     bottleneckBw = bnBw;
     bottleneckDelay = bnDelay;
@@ -226,7 +235,7 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     senderApp = setSender(groups, protocol);
     this->mboxes = mboxes;
     connectMbox(groups, controlInterval, 0.2, rateUpInterval);        // not work either
-    
+    start();
 }
 
 QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnBw, vector<string> bnDelay, vector<double> Th)
@@ -436,7 +445,7 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         }
 
         rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes.at(i)));
-        // qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
+        qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
         txRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMboxAck, &mboxes.at(i)));    // test passeds
     
 
@@ -544,8 +553,11 @@ void RunningModule::start()
     sinkApp.Stop(Seconds(rtStop));
     for(uint32_t j = 0; j < senderApp.size(); j ++)
     {
-        senderApp.at(j)->SetStartTime(Seconds(rtStart));
-        senderApp.at(j)->SetStopTime(Seconds(rtStop));
+        // senderApp.at(j)->SetStartTime(Seconds(rtStart));
+        // senderApp.at(j)->SetStopTime(Seconds(rtStop));
+        senderApp.at(j)->SetStartTime(Seconds(txStart.at(j)));
+        cout << j << ": start at " << txStart.at(j) << endl;
+        senderApp.at(j)->SetStopTime(Seconds(txEnd.at(j)));
     }
 }
 
@@ -559,15 +571,14 @@ void RunningModule::stop()
 
 int main (int argc, char *argv[])
 {
-    // set start and stop time
-    vector<double> t(2);
-    t[0] = 0.0;
+
     srand(time(0));
     Packet::EnablePrinting ();          // enable printing the metadata of packet
     Packet::EnableChecking ();
 
     // define the test options and parameteres
     ProtocolType pt = TCP;
+    int TCP_var = 1;
     FairType fairness = PRIORITY;
     bool isTrackPkt = false;
     bool isEbrc = false;            // don't use EBRC now, but also want to use loss assignment
@@ -586,7 +597,9 @@ int main (int argc, char *argv[])
     double scale = 5e3;
 
     // specify the TCP socket type in ns-3
-    Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));     
+    if(TCP_var == 1) Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));  
+    else if(TCP_var == 2) Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpVeno"));
+    else if(TCP_var == 3) Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpScalable"));  
     Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue (1400));   
     Config::SetDefault("ns3::TcpSocket::SndBufSize", UintegerValue(4096 * 1024));      // 128 (KB) by default, allow at most 85Mbps for 12ms rtt
     Config::SetDefault("ns3::TcpSocket::RcvBufSize", UintegerValue(4096 * 1024));      // here we use 4096 KB
@@ -611,7 +624,7 @@ int main (int argc, char *argv[])
     cmd.Parse (argc, argv);
 
     Th = {slrTh, llrTh};
-    t[1] = tStop;
+    // t[1] = tStop;
     cout << "Stop time: " << tStop << endl;
     cout << "SLR threshold: " << slrTh << endl;
     cout << "LLR threshold: " << llrTh << endl;
@@ -714,7 +727,7 @@ int main (int argc, char *argv[])
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
         g1.insertLink(txId1, rxId1);
         grps = {g1};
-        scale = 1e3;
+        scale = 2e3;
     }
     else if (nGrp == 1)
     {
@@ -729,9 +742,24 @@ int main (int argc, char *argv[])
         weight.push_back(0.5);
         for(int i = 0; i < nTx - 1; i ++)
             weight.push_back(0.5 / (nTx - 1) );
+        g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
         g1.insertLink(txId1, rxId1);
         grps = {g1};
-        scale = 1e3;
+        scale = 2e3;
+    }
+
+    // set start and stop time
+    cout << "Time assigned: " << endl;
+    uint32_t N = grps[0].txId.size();       // just use 1st group, cannot extend to multiple groups
+    vector<double> t(2 + N * 2);
+    t[0] = 0.0;
+    t[1] = tStop;
+    t[2] = 10.0;             // flow 0 start later than other flows
+    for(uint32_t i = 3; i < 2*N + 2; i ++)
+    {
+        if(i < N + 2) t[i] = 0.0;
+        else t[i] = tStop;
+        cout << i << ": " << t[i] << endl;
     }
 
     // running module construction

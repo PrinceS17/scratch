@@ -6,6 +6,8 @@
         "list": "cpp",
         "unordered_map": "cpp",
         "vector": "cpp",
-        "system_error": "cpp"
+        "system_error": "cpp",
+        "chrono": "cpp",
+        "limits": "cpp"
     }
 }
