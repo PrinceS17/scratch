@@ -686,9 +686,9 @@ int main (int argc, char *argv[])
     else if(nTx == 3 && nGrp == 1) // group: 3, 1
     {
         rtid = {5, 6};
-        tx2rate1 = {{1, "50Mbps"}, {2, "100Mbps"}, {3, "40Mbps"}};
+        tx2rate1 = {{1, "100Mbps"}, {2, "100Mbps"}, {3, "100Mbps"}};
         rxId1 = {7, 8, 9};
-        rate2port1 = {{"50Mbps", 80}, {"100Mbps", 90}, {"40Mbps", 70}};
+        rate2port1 = {{"100Mbps", 80}};
         // weight = {0.6, 0.2, 0.2};
         weight = {0.6, 0.3, 0.1};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
@@ -755,12 +755,19 @@ int main (int argc, char *argv[])
     t[0] = 0.0;
     t[1] = tStop;
     t[2] = 0.0;             // flow 0 start later than other flows
-    for(uint32_t i = 3; i < 2*N + 2; i ++)
+    // for(uint32_t i = 3; i < 2*N + 2; i ++)      // 0, 10, 20s
+    // {
+    //     if(i < N + 2) t[i] = (i - 2) * 10;
+    //     else t[i] = tStop;
+    //     cout << i << ": " << t[i] << endl;
+    // }
+
+    for (uint32_t i = 3; i < 2*N + 2; i ++)
     {
-        if(i < N + 2) t[i] = (i - 2) * 10;
-        else t[i] = tStop;
-        cout << i << ": " << t[i] << endl;
+        if(i > 4) t[i] = (i - 2) * 10;          // stop at 30, 40, 50
+        else t[i] = 0.0;
     }
+
 
     // running module construction
     LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
@@ -799,7 +806,7 @@ int main (int argc, char *argv[])
     // // test pause, resume and disconnect mbox
     // Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
     // Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
-    // Simulator::Schedule(Seconds(0.05), &RunningModule::pauseMbox, &rm, grps);
+    // Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
     // Simulator::Schedule(Seconds(1.01), &RunningModule::resumeMbox, &rm, grps);
 
     // flow monitor
