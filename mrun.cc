@@ -23,7 +23,7 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("RunningModule");
 
 typedef multimap<uint32_t, uint32_t>::iterator mmap_iter;
-double controlInterval = 0.06;
+double controlInterval = 0.02;
 double rateUpInterval = 0.002;
 
 void RunningModule::SetNode(Ptr<Node> pn, uint32_t i, uint32_t id)
@@ -235,6 +235,7 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     senderApp = setSender(groups, protocol);
     this->mboxes = mboxes;
     connectMbox(groups, controlInterval, 0.2, rateUpInterval);        // not work either
+    // connectMbox(groups, controlInterval, 1, rateUpInterval);
     start();
 }
 
@@ -448,12 +449,6 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
         txRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMboxAck, &mboxes.at(i)));    // test passeds
     
-
-        // record the queue length to debug the first drop 
-        qc.Get(i)->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::TcPktInQ, &mboxes.at(i)));
-        Ptr<Queue<Packet>> qp = DynamicCast<PointToPointNetDevice> (txRouter) -> GetQueue();
-        qp->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::DevPktInQ, &mboxes.at(i)));
-
         // trace TCP congestion window and RTT: tested
         for(uint32_t j = 0; j < groups.at(i).txId.size(); j ++)
         {
@@ -589,7 +584,7 @@ int main (int argc, char *argv[])
     vector<double> Th;              // threshold of slr/llr
     double slrTh = 0.01;
     double llrTh = 0.01;
-    double tStop = 150;
+    double tStop = 300;
     uint32_t MID1 = 0;
     uint32_t MID2 = 0;
     double alpha;
@@ -610,6 +605,7 @@ int main (int argc, char *argv[])
     Config::SetDefault ("ns3::QueueBase::MaxSize", StringValue (std::to_string (maxPkts) + "p"));
 
     double pSize = 1.4 * 8;         // ip pkt size: 1.4 kbit
+    vector<double> wt(20, -1.0);
 
     // command line parameters: focus on slr and llr threshold first, should display in figure name
     CommandLine cmd;
@@ -621,6 +617,9 @@ int main (int argc, char *argv[])
     cmd.AddValue ("isTrackPkt", "whether track each packet", isTrackPkt);       // input 0/1
     cmd.AddValue ("cInt", "Control interval of mbox", controlInterval);
     cmd.AddValue ("rInt", "Rate update interval", rateUpInterval);
+    cmd.AddValue ("weight1", "weight[1] for 2 weight run", wt[0]);
+    cmd.AddValue ("weight2", "weight[2] for 2 weight run", wt[1]);
+
     cmd.Parse (argc, argv);
 
     Th = {slrTh, llrTh};
@@ -632,6 +631,11 @@ int main (int argc, char *argv[])
     cout << "MID 2: " << MID2 << endl;
     cout << "Control interval: " << controlInterval << endl;
     cout << "Rate update interval: " << rateUpInterval << endl;
+    cout << "Weight: " << wt[0] << " " << wt[1] << endl;
+
+    int i = 0;
+    while (wt[i] >= 0) i++;
+    if (i > 0) nTx = i;
 
     // define bottleneck link bandwidth and delay, protocol, fairness
     vector<string> bnBw, bnDelay;
@@ -667,7 +671,8 @@ int main (int argc, char *argv[])
         rxId1 = {7, 8};
         rate2port1 = {{"200Mbps", 80}, {"200Mbps", 90}};
         // rate2port1 = {{"0.01Mbps", 80}, {"20Mbps", 90}};           // for TCP drop debug only!
-        weight = {0.7, 0.3};
+        // weight = {0.7, 0.3};
+        weight = vector<double> (wt.begin(), wt.begin() + 2);
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);      // skeptical
         g1.insertLink({1, 2}, {7, 8});
         grps = {g1};
@@ -678,7 +683,7 @@ int main (int argc, char *argv[])
         tx2rate1 = {{1, "200Mbps"}, {2, "200Mbps"}, {3, "400Mbps"}, {4, "400Mbps"}};
         rxId1 = {7, 8, 9, 10};
         rate2port1 = {{"200Mbps", 80}, {"400Mbps", 90}};
-        weight = {0.4, 0.4, 0.1, 0.1};
+        weight = {0.4, 0.3, 0.2, 0.1};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
         g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
         grps = {g1};
@@ -762,9 +767,16 @@ int main (int argc, char *argv[])
     //     cout << i << ": " << t[i] << endl;
     // }
 
+    // for (uint32_t i = 3; i < 2*N + 2; i ++)
+    // {
+    //     if(i > N + 1) t[i] = (i - 2) * 10;          // stop at 30, 40, 50
+    //     else t[i] = 0.0;
+    // }
+
+    // normal case: stop at specified time
     for (uint32_t i = 3; i < 2*N + 2; i ++)
     {
-        if(i > 4) t[i] = (i - 2) * 10;          // stop at 30, 40, 50
+        if (i > N + 1) t[i] = tStop;
         else t[i] = 0.0;
     }
 
@@ -806,7 +818,7 @@ int main (int argc, char *argv[])
     // // test pause, resume and disconnect mbox
     // Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
     // Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
-    // Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
+    Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
     // Simulator::Schedule(Seconds(1.01), &RunningModule::resumeMbox, &rm, grps);
 
     // flow monitor
