@@ -26,6 +26,32 @@ typedef multimap<uint32_t, uint32_t>::iterator mmap_iter;
 double controlInterval = 0.02;
 double rateUpInterval = 0.002;
 
+/* ------------- Begin: implementation of CapabilityHelper ------------- */
+CapabilityHelper(uint32_t flow_id, Ptr<Node> node, Ptr<NetDevice> device, Address addr)
+{
+    this->flow_id = flow_id;
+    curAckNo = -1;
+    Ptr<PointToPointNetDevice> p2pDev = DynamicCast<PointToPointNetDevice> (device);
+    this->device = p2pDev;
+
+    // set socket
+    TypeId tpid = UdpSocketFactory::GetTypeId();
+    Ptr<Socket> skt = Socket::CreateSocket(node, tpid);
+
+    // set application
+    Ptr<MyApp> app = CreateObject<MyApp> ();
+    app->isTrackPkt = false;            // seems doesn't matter
+    app->SetTagValue(flow_id + 1);      // begin from 1
+    app->Setup(skt, addr, 50, DataRate('1Mbps'));   // pkt size and rate aren't necessary
+    node->AddApplication(app);
+
+}
+
+
+
+
+/* ------------- Begin: implementation of RunningModule ------------- */
+
 void RunningModule::SetNode(Ptr<Node> pn, uint32_t i, uint32_t id)
 {
     Group g = groups.at(i);
@@ -145,6 +171,9 @@ RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType p
     }
     for (auto e:txStart) cout << e << ' ';
     cout << "tx Start pushed!" << endl;
+
+    for (auto e:txEnd) cout << e << ' ';
+    cout << "tx End pushed!" << endl;
 
     protocol = pt;
     bottleneckBw = bnBw;
@@ -449,6 +478,11 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
         txRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMboxAck, &mboxes.at(i)));    // test passeds
     
+        // debug queue size
+        qc.Get(i)->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::TcPktInQ, &mboxes.at(i)));
+        Ptr<Queue<Packet>> qp = DynamicCast<PointToPointNetDevice> (txRouter) -> GetQueue();
+        qp->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::DevPktInQ, &mboxes.at(i)));
+
         // trace TCP congestion window and RTT: tested
         for(uint32_t j = 0; j < groups.at(i).txId.size(); j ++)
         {
@@ -572,7 +606,7 @@ int main (int argc, char *argv[])
     Packet::EnableChecking ();
 
     // define the test options and parameteres
-    ProtocolType pt = TCP;
+    ProtocolType pt = UDP;
     int TCP_var = 1;
     FairType fairness = PRIORITY;
     bool isTrackPkt = false;
@@ -641,8 +675,9 @@ int main (int argc, char *argv[])
     vector<string> bnBw, bnDelay;
     if(nGrp == 1)
     {
-        bnBw = {"120Mbps"};
-        // bnBw = {"20Mbps"};
+        // bnBw = {"120Mbps"};
+        bnBw = {"20Mbps"};
+        // bnBw = {"2Mbps"};     // low rate test for queue drop and mac tx
         bnDelay = {"2ms"};
         alpha = rateUpInterval / 0.1;     // over the cover period we want
     }
@@ -760,20 +795,22 @@ int main (int argc, char *argv[])
     t[0] = 0.0;
     t[1] = tStop;
     t[2] = 0.0;             // flow 0 start later than other flows
-    // for(uint32_t i = 3; i < 2*N + 2; i ++)      // 0, 10, 20s
+    // for(uint32_t i = 3; i < 2*N + 2; i ++)      // Debug: 0, 10, 20s
     // {
     //     if(i < N + 2) t[i] = (i - 2) * 10;
     //     else t[i] = tStop;
     //     cout << i << ": " << t[i] << endl;
     // }
 
+    // Experiment setting: start: 0, 50, 100; stop: 400, 450, 500 (s)
     // for (uint32_t i = 3; i < 2*N + 2; i ++)
     // {
-    //     if(i > N + 1) t[i] = (i - 2) * 10;          // stop at 30, 40, 50
-    //     else t[i] = 0.0;
+    //     double step = 50.0;
+    //     if(i > N + 1) t[i] = tStop - (2*N + 1 - i) * step;
+    //     else t[i] = (i - 2) * step;
     // }
 
-    // normal case: stop at specified time
+    // Normal case: stop at specified time
     for (uint32_t i = 3; i < 2*N + 2; i ++)
     {
         if (i > N + 1) t[i] = tStop;
@@ -818,7 +855,7 @@ int main (int argc, char *argv[])
     // // test pause, resume and disconnect mbox
     // Simulator::Schedule(Seconds(5.1), &RunningModule::disconnectMbox, &rm, grps);
     // Simulator::Schedule(Seconds(8.1), &RunningModule::connectMbox, &rm, grps, 1.0, 1.0);
-    Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
+    // Simulator::Schedule(Seconds(0.01), &RunningModule::pauseMbox, &rm, grps);
     // Simulator::Schedule(Seconds(1.01), &RunningModule::resumeMbox, &rm, grps);
 
     // flow monitor

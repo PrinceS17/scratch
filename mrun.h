@@ -29,6 +29,30 @@ namespace ns3 {
 
 // NS_LOG_COMPONENT_DEFINE ("RunningModule");
 
+/**
+ * Capability Helper at receiver side, which can help get the tag No. from UDP packet, set ack No.
+ * for capability (of UDP), set the app for sending back ack and send ack back on RX. Members include
+ * RX net device (for tracing), flow ID (node No.), ack socket, ack sending app. 
+ */
+class CapabilityHelper
+{
+public:
+    CapabilityHelper() = default;
+    CapabilityHelper(uint32_t flow_id, Ptr<Node> node, Ptr<NetDevice> device, Address addr);// given flow ID and net device, initialize the socket and app for sending ACK
+    vector<uint32_t> GetNumFromTag(Ptr<const Packet> p);                    // given packet, extract the flow id and seq No.
+    void SendAck(uint32_t AckNo);                                           // given Ack No. send back one ACK
+    void install(uint32_t flow_id, Ptr<NetDevice> device, Address addr);    // similar to ctor, set the tracing for on RX and set the app
+    uint32_t getFlowId();
+    vector<uint32_t> getCurAck();           // use the MyApp's value
+
+private:
+    uint32_t flow_id;
+    uint32_t curAckNo;
+    Ptr<PointToPointNetDevice> device;
+    Ptr<MyApp> ackApp;
+}
+
+
 // should first set before building the topology
 class Group
 {
