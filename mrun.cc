@@ -27,28 +27,91 @@ double controlInterval = 0.02;
 double rateUpInterval = 0.002;
 
 /* ------------- Begin: implementation of CapabilityHelper ------------- */
-CapabilityHelper(uint32_t flow_id, Ptr<Node> node, Ptr<NetDevice> device, Address addr)
+CapabilityHelper::CapabilityHelper(uint32_t flow_id, Ptr<Node> node, Ptr<NetDevice> device, Address addr)
+{
+    install(flow_id, node, device, addr);
+
+    // this->flow_id = flow_id;
+    // curAckNo = -1;
+    // Ptr<PointToPointNetDevice> p2pDev = DynamicCast<PointToPointNetDevice> (device);
+    // this->device = p2pDev;
+
+    // // set socket
+    // TypeId tpid = UdpSocketFactory::GetTypeId();
+    // Ptr<Socket> skt = Socket::CreateSocket(node, tpid);
+
+    // // set application
+    // ackApp = CreateObject<MyApp> ();
+    // ackApp->isTrackPkt = false;            // seems doesn't matter
+    // ackApp->SetTagValue(flow_id + 1);      // begin from 1
+    // ackApp->Setup(skt, addr, 50, DataRate('1Mbps'));   // pkt size and rate aren't necessary
+    // node->AddApplication(ackApp);
+
+}
+
+vector<int> CapabilityHelper::GetNumFromTag(Ptr<const Packet> p)
+{
+    Ptr<const Packet> pcp = p->Copy();
+    MyTag tag;
+    if (!pcp->PeekPacketTag(tag)) return {-1, -1};
+    MyApp temp;
+    uint32_t tagScale = temp.tagScale;
+    int index = tag.GetSimpleValue() / tagScale - 1;        // tag should include cnt, even not in debug mode
+    int cnt = tag.GetSimpleValue() % tagScale;
+    return {index, cnt};
+}
+
+void CapabilityHelper::SendAck(Ptr<const Packet> p)
+{
+    vector<int> vec = GetNumFromTag(p);
+    if(vec[1] < 0) 
+    { 
+        // cout << "   - CapabilityHelper:: ACK not sent! " << vec[0] << ". " << vec[1] << endl; 
+        return;
+    }
+    uint32_t ackNo = vec[1];
+    curAckNo = ackNo;
+    ackApp->SendAck(ackNo);
+    // cout << "   - CapabilityHelper:: ACK " << ackNo << " of flow " << flow_id << " sent!" << endl;
+}
+
+void CapabilityHelper::install(uint32_t flow_id, Ptr<Node> node, Ptr<NetDevice> device, Address addr)
 {
     this->flow_id = flow_id;
-    curAckNo = -1;
+    curAckNo = 9999;
     Ptr<PointToPointNetDevice> p2pDev = DynamicCast<PointToPointNetDevice> (device);
     this->device = p2pDev;
+
+    // only for debug
+    cout << "   - flow-id: " << this->flow_id << ", cur ack: " << curAckNo << ", ptr: " << this << endl;
 
     // set socket
     TypeId tpid = UdpSocketFactory::GetTypeId();
     Ptr<Socket> skt = Socket::CreateSocket(node, tpid);
 
     // set application
-    Ptr<MyApp> app = CreateObject<MyApp> ();
-    app->isTrackPkt = false;            // seems doesn't matter
-    app->SetTagValue(flow_id + 1);      // begin from 1
-    app->Setup(skt, addr, 50, DataRate('1Mbps'));   // pkt size and rate aren't necessary
-    node->AddApplication(app);
+    ackApp = CreateObject<MyApp> ();
+    ackApp->isTrackPkt = true;            // seems doesn't matter
+    ackApp->SetTagValue(flow_id + 1);      // begin from 1
+    ackApp->Setup(skt, addr, 15, DataRate('1Mbps'));   // pkt size and rate aren't necessary
+    // node->AddApplication(ackApp);
+    ackApp->StartAck();
 
+    // set tracing
+    // this->device->TraceConnectWithoutContext("MacRx", MakeCallback(&CapabilityHelper::SendAck, this));
+
+    cout << "   - CapabilityHelper is installed on RX node " << flow_id << ": tag scale = " << ackApp->tagScale << endl;
 }
 
+uint32_t CapabilityHelper::getFlowId()
+{
+    return flow_id;
+}
 
-
+vector<uint32_t> CapabilityHelper::getCurAck()
+{
+    return {flow_id, curAckNo};
+}
 
 /* ------------- Begin: implementation of RunningModule ------------- */
 
@@ -261,6 +324,15 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
 
     ifc = setAddress();
     sinkApp = setSink(groups, protocol);
+
+    setCapabilityHelper(groups);     // need testing!
+    // for debug only
+    for(uint32_t i = 0; i < chelpers.size(); i ++)
+    {
+        cout << "    -- After installation: flow " << chelpers[i].getFlowId() << " has ptr " << &chelpers.at(i) << endl;
+    }
+
+
     senderApp = setSender(groups, protocol);
     this->mboxes = mboxes;
     connectMbox(groups, controlInterval, 0.2, rateUpInterval);        // not work either
@@ -374,6 +446,55 @@ ApplicationContainer RunningModule::setSink(vector<Group> grp, ProtocolType pt)
     return sinkApp;
 }
 
+vector< CapabilityHelper > RunningModule::setCapabilityHelper(vector<Group> grp)
+{
+    NS_LOG_FUNCTION("Begin.");
+    int idx = 0;
+    for (uint32_t i = 0; i < grp.size(); i ++)
+    {
+        Group g = grp.at(i);
+        uint32_t n = g.rxId.size();
+        
+        for (uint32_t j = 0; j < g.txId.size(); j ++)
+        {
+            uint32_t tId = g.txId[j];
+            // uint32_t rx_id = g.tx2rx.equal_range(tId);
+            uint32_t rx_id = g.rxId[j];                 // short cut, not flexible for the case that TX are not equal to RX!!!
+            uint32_t ri = find(g.rxId.begin(), g.rxId.end(), rx_id) - g.rxId.begin();
+            string rate = g.tx2rate.at(tId);
+            uint32_t port = g.rate2port.at(rate);
+            Address sourceAddr(InetSocketAddress(dv.at(i).GetLeftIpv4Address(j), port));
+
+            Ptr<Node> rx_node = GetNode(i, rx_id);
+            Ptr<NetDevice> rx_device = rx_node->GetDevice(0);
+            
+            CapabilityHelper tmp;
+            chelpers.push_back(tmp);
+            chelpers.at(idx).install(ri, rx_node, rx_device, sourceAddr);
+            
+            idx ++;
+        }
+    }
+
+    // set tracing in another part to avoid coupling
+    idx = 0;
+    for (uint32_t i = 0; i < grp.size(); i ++)
+    {
+        Group g = grp.at(i);
+        for (uint32_t j = 0; j < g.txId.size(); j ++)
+        {
+            uint32_t rId = g.rxId[j];
+            uint32_t ri = j;
+            Ptr<Node> rx_node = GetNode(i, rId);
+            Ptr<NetDevice> rx_device = rx_node->GetDevice(0);
+            rx_device->TraceConnectWithoutContext("MacRx", MakeCallback(&CapabilityHelper::SendAck, &chelpers.at(idx)));
+            cout << "   - f " << j << " 's addr in set chelper: " << &chelpers.at(idx) << endl;
+            idx ++;
+        }
+    }
+    return chelpers;
+}
+
 vector< Ptr<MyApp> > RunningModule::setSender(vector<Group> grp, ProtocolType pt)
 {
     NS_LOG_FUNCTION("Begin.");
@@ -469,7 +590,8 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
             txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i))); 
         else
         {
-            for(uint32_t j = 0; j < groups.at(i).txId.size(); j ++)
+            // for(uint32_t j = 0; j < groups.at(i).txId.size(); j ++)         // I think index error is the main cause of mac rx error!!!!
+            for(uint32_t j = 1; j < txNode->GetNDevices(); j ++)
                 bool res = txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
             txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mboxes.at(i)));      // necessary for TCP loss detection
         }
@@ -612,7 +734,7 @@ int main (int argc, char *argv[])
     bool isTrackPkt = false;
     bool isEbrc = false;            // don't use EBRC now, but also want to use loss assignment
     bool isTax = true;              // true: scheme 1, tax; false: scheme 2, counter
-    bool isBypass = true;
+    bool isBypass = false;
     uint32_t nTx = 3;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
     vector<double> Th;              // threshold of slr/llr
@@ -675,8 +797,8 @@ int main (int argc, char *argv[])
     vector<string> bnBw, bnDelay;
     if(nGrp == 1)
     {
-        // bnBw = {"120Mbps"};
-        bnBw = {"20Mbps"};
+        bnBw = {"120Mbps"};
+        // bnBw = {"20Mbps"};
         // bnBw = {"2Mbps"};     // low rate test for queue drop and mac tx
         bnDelay = {"2ms"};
         alpha = rateUpInterval / 0.1;     // over the cover period we want

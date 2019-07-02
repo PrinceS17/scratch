@@ -39,9 +39,13 @@ class CapabilityHelper
 public:
     CapabilityHelper() = default;
     CapabilityHelper(uint32_t flow_id, Ptr<Node> node, Ptr<NetDevice> device, Address addr);// given flow ID and net device, initialize the socket and app for sending ACK
-    vector<uint32_t> GetNumFromTag(Ptr<const Packet> p);                    // given packet, extract the flow id and seq No.
-    void SendAck(uint32_t AckNo);                                           // given Ack No. send back one ACK
-    void install(uint32_t flow_id, Ptr<NetDevice> device, Address addr);    // similar to ctor, set the tracing for on RX and set the app
+    // CapabilityHelper(const CapabilityHelper &);
+    // CapabilityHelper & operator = (const CapabilityHelper);
+    // ~CapabilityHelper();                // need to form a vector
+    
+    vector<int> GetNumFromTag(Ptr<const Packet> p);                    // given packet, extract the flow id and seq No.
+    void SendAck(Ptr<const Packet> p);                                           // given Ack No. send back one ACK
+    void install(uint32_t flow_id, Ptr<Node> node, Ptr<NetDevice> device, Address addr);    // similar to ctor, set the tracing for on RX and set the app
     uint32_t getFlowId();
     vector<uint32_t> getCurAck();           // use the MyApp's value
 
@@ -50,7 +54,7 @@ private:
     uint32_t curAckNo;
     Ptr<PointToPointNetDevice> device;
     Ptr<MyApp> ackApp;
-}
+};
 
 
 // should first set before building the topology
@@ -140,7 +144,7 @@ public:
      * \param delay Bottleneck link delay.
      * \param rate Vector of different level of data rate, e.g. {1kbps, 10kbps, 1Mbps} 
      * for three groups.
-     * \param size Packet size, 1000 kB by default.
+     * \param size Packet size, 1000 B by default.
      */
     RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, vector<bool> fls = {false, true}, uint32_t size = 1000);
     ~RunningModule ();
@@ -202,6 +206,14 @@ public:
      * \returns An application container for all sink apps.
      */
     ApplicationContainer setSink(vector<Group> grp, ProtocolType pt);
+    /**
+     * \brief Set the capability helper at the receiver side.
+     * 
+     * \param Node group with rate level (containing port for different rate).
+     * 
+     * \returns A vector of all capability helpers.
+     */
+    vector< CapabilityHelper > setCapabilityHelper(vector<Group> grp);
     /**
      * \brief Set the sender application (may set from outside)
      * 
@@ -307,6 +319,7 @@ public:         // network entity
     QueueDiscContainer qc;          // queue container for trace
     Ipv4InterfaceContainer ifc;     // ipv4 interface container for flow destination specification
     ApplicationContainer sinkApp;   // sink app
+    vector< CapabilityHelper > chelpers;    // capability helpers on RX nodes
     vector< Ptr<MyApp> > senderApp;   // sender app: need testing!
 
     vector<PointToPointDumbbellHelper> dv;  // use to preserve channel information
