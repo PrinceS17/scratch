@@ -86,7 +86,7 @@ void CapabilityHelper::install(uint32_t flow_id, Ptr<Node> node, Ptr<NetDevice> 
     cout << "   - flow-id: " << this->flow_id << ", cur ack: " << curAckNo << ", ptr: " << this << endl;
 
     // set socket
-    TypeId tpid = UdpSocketFactory::GetTypeId();
+    TypeId tpid = UdpSocketFactory::GetTypeId();        // currently only for UDP
     Ptr<Socket> skt = Socket::CreateSocket(node, tpid);
 
     // set application
@@ -325,13 +325,15 @@ void RunningModule::configure(double stopTime, ProtocolType pt, vector<string> b
     ifc = setAddress();
     sinkApp = setSink(groups, protocol);
 
-    setCapabilityHelper(groups);     // need testing!
-    // for debug only
-    for(uint32_t i = 0; i < chelpers.size(); i ++)
+    if(pt == UDP)
     {
-        cout << "    -- After installation: flow " << chelpers[i].getFlowId() << " has ptr " << &chelpers.at(i) << endl;
+        setCapabilityHelper(groups);     // need testing!
+        // for debug only
+        for(uint32_t i = 0; i < chelpers.size(); i ++)
+        {
+            cout << "    -- After installation: flow " << chelpers[i].getFlowId() << " has ptr " << &chelpers.at(i) << endl;
+        }
     }
-
 
     senderApp = setSender(groups, protocol);
     this->mboxes = mboxes;
