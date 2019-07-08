@@ -84,6 +84,12 @@ void onLeftRx (Ptr<const Packet> p)
     cout << " (" << getPktSize (p)[0] << " B) " << endl;
 }
 
+void setTokenRate (string newRate, Ptr<QueueDisc> q)
+{
+    cout << Simulator::Now().GetSeconds() << ": set token rate to " << newRate << endl;
+    q->SetAttribute("Rate", StringValue(newRate));
+}
+
 int main()
 {
     // link settings
@@ -172,6 +178,10 @@ int main()
     for (uint32_t i = 0; i < d.RightCount (); ++i)
         d.GetRight ()->GetDevice (i + 1)->TraceConnectWithoutContext ("MacRx", MakeCallback (&onRightRx));
     d.GetLeft ()->GetDevice (0)->TraceConnectWithoutContext ("MacRx", MakeCallback (&onLeftRx));
+
+    // test: schedule the modification of token rate
+    string newRate = "64kbps";
+    // Simulator::Schedule(Seconds(10), &setTokenRate, newRate, qdc.Get(0));
 
     // set simulation
     Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
