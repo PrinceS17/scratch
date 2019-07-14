@@ -58,11 +58,12 @@ main (int argc, char *argv[])
 
   Ipv4AddressHelper address, addr2;
   address.SetBase ("10.1.1.0", "255.255.255.0");
-  addr2.SetBase ("10.2.1.0", "255.255.255.0");
 
   Ipv4InterfaceContainer interfaces;
   interfaces.Add (address.Assign (dev1) );
-  // address.NewNetwork();
+  // address.SetBase ("10.2.1.0", "255.255.255.0");
+  address.NewNetwork();
+
   interfaces.Add (address.Assign (dev2) );
   cout << "Interfaces: " << endl;
   for (uint32_t i = 0; i < interfaces.GetN(); i ++)
@@ -73,11 +74,11 @@ main (int argc, char *argv[])
 
   UdpEchoServerHelper echoServer (9);
 
-  ApplicationContainer serverApps = echoServer.Install (nodes.Get (1));   // Get(1)
+  ApplicationContainer serverApps = echoServer.Install (nodes.Get (2));   // Get(1)
   serverApps.Start (Seconds (1.0));
   serverApps.Stop (Seconds (10.0));
 
-  UdpEchoClientHelper echoClient (interfaces.GetAddress (1), 9);          // GetAddress(1)
+  UdpEchoClientHelper echoClient (interfaces.GetAddress (3), 9);          // GetAddress(1)
   echoClient.SetAttribute ("MaxPackets", UintegerValue (2));
   echoClient.SetAttribute ("Interval", TimeValue (Seconds (1.0)));
   echoClient.SetAttribute ("PacketSize", UintegerValue (1024));
@@ -86,6 +87,8 @@ main (int argc, char *argv[])
   clientApps.Start (Seconds (2.0));
   clientApps.Stop (Seconds (10.0));
 
+
+  Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
 
   AsciiTraceHelper ascii;
   pointToPoint.EnableAsciiAll (ascii.CreateFileStream ("myfirst.tr"));
