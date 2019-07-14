@@ -19,6 +19,7 @@
 #include "ns3/point-to-point-layout-module.h"
 #include "ns3/traffic-control-module.h"
 #include "ns3/tcp-socket-factory.h"
+#include "ns3/udp-socket-factory.h"
 #include "ns3/ipv4-flow-classifier.h"
 #include "ns3/tag.h"
 #include "ns3/packet.h"
@@ -383,9 +384,28 @@ main(int argc, char *argv[])
                         Ipv4AddressHelper ("10.2.1.0", "255.255.255.0"),
                         Ipv4AddressHelper ("10.3.1.0", "255.255.255.0"));
 
+    // IP address test
+    stringstream ss1;
+    ss1 << "TX: " << endl;
+    for(uint32_t i = 0; i < d.RightCount(); i ++)
+    {
+        ss1 << "    ";
+        d.GetRightIpv4Address(i).Print(ss1);
+        ss1 << endl;
+    }
+    ss1 << "RX: " << endl;
+    for(uint32_t i = 0; i < d.LeftCount(); i ++)
+    {
+        ss1 << "    ";
+        d.GetLeftIpv4Address(i).Print(ss1);
+        ss1 << endl;
+    }
+    NS_LOG_INFO(ss1.str());
+
     // sink App
     Address sinkLocalAddress(InetSocketAddress(Ipv4Address::GetAny(), port));
-    PacketSinkHelper psh("ns3::TcpSocketFactory", sinkLocalAddress);
+    // PacketSinkHelper psh("ns3::TcpSocketFactory", sinkLocalAddress);
+    PacketSinkHelper psh("ns3::UdpSocketFactory", sinkLocalAddress);
     ApplicationContainer sinkApps;
     for(uint32_t i = 0; i < d.LeftCount(); i ++)
         sinkApps.Add(psh.Install(d.GetLeft(i)));
@@ -395,7 +415,8 @@ main(int argc, char *argv[])
     // client App
     for(uint32_t i = 0; i < d.RightCount(); i ++)
     {
-        Ptr<Socket> skt = Socket::CreateSocket(d.GetRight(i), TcpSocketFactory::GetTypeId());
+        // Ptr<Socket> skt = Socket::CreateSocket(d.GetRight(i), TcpSocketFactory::GetTypeId());
+        Ptr<Socket> skt = Socket::CreateSocket(d.GetRight(i), UdpSocketFactory::GetTypeId());
         Address addr(InetSocketAddress(d.GetLeftIpv4Address(i), port));
         Ptr<MyApp> app = CreateObject<MyApp> ();
         app->SetTagValue(i + 1);
@@ -405,8 +426,8 @@ main(int argc, char *argv[])
         app->SetStopTime(Seconds(tStop));
 
         // tracing cwnd chagne: need test
-        string context1 = "/NodeList/0/$ns3::TcpL4Protocol/SocketList/" + to_string(i) + "/CongestionWindow";
-        app->GetSocket()->TraceConnect("CongestionWindow", context1, MakeCallback(&onCwndChange));
+        // string context1 = "/NodeList/0/$ns3::TcpL4Protocol/SocketList/" + to_string(i) + "/CongestionWindow";
+        // app->GetSocket()->TraceConnect("CongestionWindow", context1, MakeCallback(&onCwndChange));
         // skt->TraceConnectWithoutContext("Congestionwindow",  MakeCallback(&onCwndChange));
     }
 
