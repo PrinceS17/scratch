@@ -202,7 +202,6 @@ void RunningModule::buildTopology(vector<Group> grp)
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
         Group g = grp[i];
-        PointToPointHelper bottleneck;
         bottleneck.SetDeviceAttribute("DataRate", StringValue(bottleneckBw[i]));
         bottleneck.SetChannelAttribute("Delay", StringValue(bottleneckDelay[i]));
         bottleneck.SetDeviceAttribute("Mtu", StringValue(mtu));
@@ -379,6 +378,8 @@ Ipv4InterfaceContainer RunningModule::setAddress()
         ifc.Add( ih.Assign(ndc1) );
         id2ipv4Index[make_pair(g.routerId[0], 0)] = index ++;
         id2ipv4Index[make_pair(g.routerId[1], 0)] = index ++;
+        // ih.NewNetwork();
+        ih.SetBase ("11.1.0.0", "255.255.255.0");
 
         for(uint32_t j = 0; j < g.txId.size(); j ++)
         {
@@ -389,7 +390,10 @@ Ipv4InterfaceContainer RunningModule::setAddress()
             ifc.Add( ih.Assign(ndc2) );
             id2ipv4Index[make_pair(g.txId[j], 0)] = index ++;
             id2ipv4Index[make_pair(g.routerId[0], j + 1)] = index ++;
+            ih.NewNetwork();
         }
+        // ih.NewNetwork();
+        ih.SetBase ("12.1.0.0", "255.255.255.0");
         for(uint32_t j = 0; j < g.rxId.size(); j ++)
         {
             // rx and right router address
@@ -399,6 +403,7 @@ Ipv4InterfaceContainer RunningModule::setAddress()
             ifc.Add( ih.Assign(ndc3) );
             id2ipv4Index[make_pair(g.routerId[1], j + 1)] = index ++;
             id2ipv4Index[make_pair(g.rxId[j], 0)] = index ++;
+            ih.NewNetwork();
         }
     }
 
@@ -609,6 +614,7 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         Ptr<NetDevice> txRouter = GetNode(i, grp[i].routerId[0])->GetDevice(0);
         Ptr<NetDevice> rxRouter = GetNode(i, grp[i].routerId[1])->GetDevice(0);
         Ptr<Node> txNode = GetNode(i, grp[i].routerId[0]);
+        Ptr<Node> rxNode = GetNode(i, grp[i].routerId[1]);
         NetDeviceContainer nc;
         for(uint32_t j = 1; j <= grp[i].txId.size(); j ++)
             nc.Add(txNode->GetDevice(j));               // add rx side devices, this line will add the loop back
@@ -642,17 +648,27 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
             for(uint32_t j = 1; j <= grp[i].txId.size(); j ++)
             // for(uint32_t j = 1; j < txNode->GetNDevices(); j ++)
             {
+                bottleneck.EnablePcapAll("router");
                 bool res = txNode->GetDevice(j)->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMacRx, &mboxes.at(i)));
                 ss1 << "       - onMacRx install: " << res << "; addr: " << txNode->GetDevice(j)->GetAddress() << endl;
             }
             txRouter->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onMacTx, &mboxes.at(i)));      // necessary for TCP loss detection
         }
-        NS_LOG_INFO(ss1.str());
+       
 
         rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes.at(i)));
         qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
         txRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMboxAck, &mboxes.at(i)));    // test passeds
     
+        // debug packet path
+        for (uint32_t j = 1; j <= grp[i].rxId.size(); j ++)
+        {
+            bool rxRes = rxNode->GetDevice(j)->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onRouterTx, &mboxes.at(i)));
+            ss1 << "    - trace on rx router TX: " << rxRes << endl;
+        }
+        NS_LOG_INFO(ss1.str());
+
+
         // debug queue size
         qc.Get(i)->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::TcPktInQ, &mboxes.at(i)));
         Ptr<Queue<Packet>> qp = DynamicCast<PointToPointNetDevice> (txRouter) -> GetQueue();
@@ -683,8 +699,8 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         {
             Ptr<NetDevice> senderDev = GetNode(i, grp[i].txId[k])->GetDevice(0);
             bool b1 = senderDev->TraceConnectWithoutContext("MacTx", MakeCallback(&MiddlePoliceBox::onSenderTx, &mboxes.at(i)));
-            bool b2 = senderDev->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onAckRx, &mboxes.at(i)));
-            cout << " -- Sender debug: MacTx: " << b1 << "; MacRX: " << b2 << endl;
+            // bool b2 = senderDev->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onAckRx, &mboxes.at(i)));
+            cout << " -- Sender debug: MacTx: " << b1 << endl;
         }
 
 
@@ -782,7 +798,7 @@ int main (int argc, char *argv[])
     Packet::EnableChecking ();
 
     // define the test options and parameteres
-    ProtocolType pt = TCP;
+    ProtocolType pt = UDP;
     int TCP_var = 1;
     FairType fairness = PRIORITY;
     bool isTrackPkt = false;

@@ -21,7 +21,6 @@
 #include "ns3/applications-module.h"
 
 using namespace ns3;
-using namespace std;
 
 NS_LOG_COMPONENT_DEFINE ("FirstScriptExample");
 
@@ -36,27 +35,19 @@ main (int argc, char *argv[])
   LogComponentEnable ("UdpEchoServerApplication", LOG_LEVEL_INFO);
 
   NodeContainer nodes;
-  nodes.Create (3);
+  nodes.Create (2);
 
   PointToPointHelper pointToPoint;
   pointToPoint.SetDeviceAttribute ("DataRate", StringValue ("5Mbps"));
   pointToPoint.SetChannelAttribute ("Delay", StringValue ("2ms"));
 
-  NetDeviceContainer dev1 ,dev2;
-  dev1 = pointToPoint.Install (nodes.Get(0), nodes.Get(1));
-  dev2 = pointToPoint.Install (nodes.Get(1), nodes.Get(2));
-
-  cout << "Address from devices: " << endl;
-  for (uint32_t i = 0; i < nodes.GetN(); i ++)
-  {
-    for (uint32_t j = 0; j < nodes.Get(i)->GetNDevices(); j ++)
-      cout << nodes.Get(i)->GetDevice(j)->GetAddress() << endl;
-  }
+  NetDeviceContainer devices;
+  devices = pointToPoint.Install (nodes);
 
   InternetStackHelper stack;
   stack.Install (nodes);
 
-  Ipv4AddressHelper address, addr2;
+  Ipv4AddressHelper address;
   address.SetBase ("10.1.1.0", "255.255.255.0");
 
   Ipv4InterfaceContainer interfaces;
@@ -93,7 +84,7 @@ main (int argc, char *argv[])
   AsciiTraceHelper ascii;
   pointToPoint.EnableAsciiAll (ascii.CreateFileStream ("myfirst.tr"));
   pointToPoint.EnablePcapAll ("myfirst");
-  
+
   Simulator::Run ();
   Simulator::Destroy ();
   return 0;
