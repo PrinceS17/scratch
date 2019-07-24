@@ -77,24 +77,7 @@ void onRightRx (Ptr<const Packet> p)
     cout << time << ": - onRightRx. from ";
     srcAddr.Print(cout);
     cout << " (" << getPktSize (p)[0] << " B) " << endl;
-    
-    // // change token rate after 5s
-    // if (!if_changed && time > 5)
-    // {
-    //     UdpHeader udpH;
-    //     Ipv4Header ipH;
-    //     PppHeader ppH;
-    //     Ptr<Packet> pcp = p->Copy ();
-    //     pcp->RemoveHeader (udpH);
-    //     pcp->RemoveHeader (ipH);
-    //     pcp->RemoveHeader (ppH);
-    //     Address mac = Address(ipH.GetDestination());    // destination MAC, might be wrong
-    //     uint16_t pt = ppH.GetProtocol();
-    //     Ptr<Ipv4QueueDiscItem> qdi = Create<Ipv4QueueDiscItem>(pcp, mac, pt, ipH);
-    //     Ptr<FqTbfQueueDisc> qp = DynamicCast<FqTbfQueueDisc> (qc.Get(0));
-    //     qp-> SetTokenRate (qdi, "16kbps");
-    //     if_changed = true;
-    // }
+
 }
 
 void onLeftRx (Ptr<const Packet> p)
