@@ -21,6 +21,7 @@
 #include "ns3/applications-module.h"
 
 using namespace ns3;
+using namespace std;
 
 NS_LOG_COMPONENT_DEFINE ("FirstScriptExample");
 
@@ -35,14 +36,15 @@ main (int argc, char *argv[])
   LogComponentEnable ("UdpEchoServerApplication", LOG_LEVEL_INFO);
 
   NodeContainer nodes;
-  nodes.Create (2);
+  nodes.Create (3);
 
   PointToPointHelper pointToPoint;
   pointToPoint.SetDeviceAttribute ("DataRate", StringValue ("5Mbps"));
   pointToPoint.SetChannelAttribute ("Delay", StringValue ("2ms"));
 
-  NetDeviceContainer devices;
-  devices = pointToPoint.Install (nodes);
+  NetDeviceContainer dev1, dev2;
+  dev1 = pointToPoint.Install (nodes.Get(0), nodes.Get(1));
+  dev2 = pointToPoint.Install (nodes.Get(1), nodes.Get(2));
 
   InternetStackHelper stack;
   stack.Install (nodes);

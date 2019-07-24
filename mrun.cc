@@ -26,6 +26,23 @@ typedef multimap<uint32_t, uint32_t>::iterator mmap_iter;
 double controlInterval = 0.02;
 double rateUpInterval = 0.002;
 
+// for debug
+fstream tokenOut;
+
+void FirstBucketTrace (uint32_t oldV, uint32_t newV)
+{
+    double time = Simulator::Now().GetSeconds();
+    tokenOut << time << " " << newV << endl;
+}
+
+void SecondBucketTrace (uint32_t oldV, uint32_t newV)
+{
+    double time = Simulator::Now().GetSeconds();
+    tokenOut << time << " " << newV << endl;
+}
+
+
+
 /* ------------- Begin: implementation of CapabilityHelper ------------- */
 CapabilityHelper::CapabilityHelper(uint32_t flow_id, Ptr<Node> node, Ptr<NetDevice> device, Address addr)
 {
@@ -207,39 +224,42 @@ void RunningModule::buildTopology(vector<Group> grp)
         bottleneck.SetDeviceAttribute("Mtu", StringValue(mtu));
         InternetStackHelper stack;
 
-        /*
+
+        // add mbox node
         vector<uint32_t> rt_id(3);                      // mbox --> tx router --> rx router
-        for(auto j:{0, 1, 2})
+        for(auto j:{0, 1, 2})                           // unique for mbox (UFM)
         {
             rt_id[j] = SetNode(2, i, j);
 
             if(!i) rt_ptr.Add(nodes.Get(rt_id[j]));
         }
-        Ptr<Node> tx_router = nodes.Get(rt_id[0]);
-        Ptr<Node> rx_router = nodes.Get(rt_id[1]);
-        Ptr<Node> mb_router = nodes.Get(rt_id[2]);
-        leaf.Install(mb_router, tx_router);
-        bottleneck.Install(tx_router, rx_router);
+        Ptr<Node> mb_router = nodes.Get(rt_id[0]);
+        Ptr<Node> tx_router = nodes.Get(rt_id[1]);
+        Ptr<Node> rx_router = nodes.Get(rt_id[2]);
+        routerDevice.Add( leaf.Install(mb_router, tx_router) );     // UFM
+        routerDevice.Add( bottleneck.Install(tx_router, rx_router) );
 
         for(uint32_t j = 0; j < g.txId.size(); j ++)    // left leaf nodes --> mbox
         {
             uint32_t idx = SetNode(0, i, j);
-            leaf.Install(nodes.Get(idx), mb_router);
-
+            NetDeviceContainer ndc1 = leaf.Install(nodes.Get(idx), mb_router);
+            txDevice.Add(ndc1.Get(0));
+            txRouterDevice.Add(ndc1.Get(1));
             if(!i && !j) leaf_ptr.Add(nodes.Get(idx));
         }
         for(uint32_t j = 0; j < g.rxId.size(); j ++)    // rx router --> right leaf nodes
         {
             uint32_t idx = SetNode(1, i, j);
-            leaf.Install(rx_router, nodes.Get(idx));
-
+            NetDeviceContainer ndc2 = leaf.Install(rx_router, nodes.Get(idx));
+            rxRouterDevice.Add(ndc2.Get(0));
+            rxDevice.Add(ndc2.Get(1));
             if(!i && !j) leaf_ptr.Add(nodes.Get(idx));
         }
-        for(uint32_t k = 0; k < nodes.GetN(); k ++)     // install the stack at last
-            stack.Install(nodes.Get(k));
-        */
+        stack.Install(nodes);
+    }
 
-        // test: no mbox at first, only tx and rx router
+/*
+        // tested: no mbox at first, only tx and rx router
         vector<uint32_t> rt_id(2);
         for(auto j:{0, 1})
         {
@@ -268,24 +288,25 @@ void RunningModule::buildTopology(vector<Group> grp)
         }
         stack.Install(nodes);               // install the stack at last
     }
+*/
 
     // verify the node id and state
     NodeContainer TmpNode;
     TmpNode.Add( GetNode(0, grp[0].txId[0]) );
-    TmpNode.Add( GetNode(0, grp[0].routerId[0]) );     // tx router
-    TmpNode.Add( GetNode(0, grp[0].routerId[1]) );     // rx router
-    // TmpNode.Add( GetNode(0, grp[0].routerId[2]) );     // mbox router
+    TmpNode.Add( GetNode(0, grp[0].routerId[0]) );     // mbox router
+    TmpNode.Add( GetNode(0, grp[0].routerId[1]) );     // tx router
+    TmpNode.Add( GetNode(0, grp[0].routerId[2]) );     // rx router
     TmpNode.Add( GetNode(0, grp[0].rxId[0]) );
 
     NS_ASSERT_MSG(TmpNode.Get(0) == leaf_ptr.Get(0), "Ptr<Node> for TX leaf (0,0) is incorrect!");
-    NS_ASSERT_MSG(TmpNode.Get(1) == rt_ptr.Get(0), "Ptr<Node> for TX router is incorrect!");
-    NS_ASSERT_MSG(TmpNode.Get(2) == rt_ptr.Get(1), "Ptr<Node> for RX router is incorrect!");
-    // NS_ASSERT_MSG(TmpNode.Get(3) == rt_ptr.Get(2), "Ptr<Node> for mbox router is incorrect!");
-    NS_ASSERT_MSG(TmpNode.Get(3) == leaf_ptr.Get(1), "Ptr<Node> for RX leaf (0,0) is incorrect!");
+    NS_ASSERT_MSG(TmpNode.Get(1) == rt_ptr.Get(0), "Ptr<Node> for mbox router is incorrect!");
+    NS_ASSERT_MSG(TmpNode.Get(2) == rt_ptr.Get(1), "Ptr<Node> for TX router is incorrect!");
+    NS_ASSERT_MSG(TmpNode.Get(3) == rt_ptr.Get(2), "Ptr<Node> for RX router is incorrect!");
+    NS_ASSERT_MSG(TmpNode.Get(4) == leaf_ptr.Get(1), "Ptr<Node> for RX leaf (0,0) is incorrect!");
     NS_LOG_INFO("Ptr<Node> check passed.");
 
     ss << "Node verification:  # dev    MAC addresses   MTU" << endl;
-    for(auto i: {0,1,2,3})
+    for(auto i: {0,1,2,3,4})
     {
         ss << "                    " << TmpNode.Get(i)->GetNDevices() << "        ";
         for(uint32_t j = 0; j < TmpNode.Get(i)->GetNDevices(); j ++)
@@ -327,27 +348,44 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
 {
     NS_LOG_FUNCTION("Begin.");
 
-    // set RED queue
+    // set RED queue and TBFQ
+    // string token_rate = "50Mbps";
+    // string peak_rate = "50Mbps";
+    string token_rate = "1Gbps";
+    string peak_rate = "1Gbps"; 
     QueueDiscContainer qc;
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
-        TrafficControlHelper tch;
-        if(Th.empty()) tch.SetRootQueueDisc("ns3::RedQueueDisc", 
+        TrafficControlHelper tbf_tch;           // TBF queue
+        tbf_tch.SetRootQueueDisc ("ns3::TbfQueueDisc",
+                            "MaxSize", QueueSizeValue (QueueSize (QueueSizeUnit::PACKETS , 500)),    // hard coded for debug
+                            "Burst", UintegerValue (100000),    // 100B, test
+                            // "Mtu", StringValue ("2000"),             // 2nd bucket size, not the mtu here
+                            "Rate", StringValue (token_rate),
+                            "PeakRate", StringValue (peak_rate));
+
+        TrafficControlHelper red_tch;
+        if(Th.empty()) red_tch.SetRootQueueDisc("ns3::RedQueueDisc", 
                                             "MinTh", DoubleValue(5),
                                             "MaxTh", DoubleValue(15),
                                             "LinkBandwidth", StringValue(bnBw.at(i)),
                                             "LinkDelay", StringValue(bnDelay.at(i)));
-        else tch.SetRootQueueDisc("ns3::RedQueueDisc",
+        else red_tch.SetRootQueueDisc("ns3::RedQueueDisc",
                                 "MinTh", DoubleValue(Th.at(0)),
                                 "MaxTh", DoubleValue(Th.at(1)),
                                 "LinkBandwidth", StringValue(bnBw.at(i)),
                                 "LinkDelay", StringValue(bnDelay.at(i)));
 
         // qc.Add(tch.Install(GetNode(i, grp.at(i).routerId[0])->GetDevice(0)));
-        Ptr<NetDevice> txRouter = GetNode(i, grp[i].routerId[0])->GetDevice(0);
-        Ptr<NetDevice> rxRouter = GetNode(i, grp[i].routerId[1])->GetDevice(0);
-        qc.Add(tch.Install(txRouter));
-        cout << "type id of queue: " << qc.Get(0)->GetInstanceTypeId() << endl;
+        // Ptr<NetDevice> mbRouter = GetNode(i, grp[i].routerId[0])->GetDevice(0);
+        // Ptr<NetDevice> txRouter = GetNode(i, grp[i].routerId[1])->GetDevice(0);      // should word, but complicated
+        Ptr<NetDevice> mbRouter = routerDevice.Get(0);
+        Ptr<NetDevice> txRouter = routerDevice.Get(2);
+
+        qc.Add(tbf_tch.Install(mbRouter));
+        qc.Add(red_tch.Install(txRouter));
+        cout << "type id of queue: " << qc.Get(0)->GetInstanceTypeId() << ", " << 
+            qc.Get(1)->GetInstanceTypeId() << endl;
     }
 
     return qc;
@@ -371,29 +409,36 @@ Ipv4InterfaceContainer RunningModule::setAddress()
     {
         Group g = groups[i];
 
-        // tx router and rx router address
+        // mbox router and tx router
+        NetDeviceContainer ndc0;
+        ndc0.Add(routerDevice.Get(pt[0] ++));
+        ndc0.Add(routerDevice.Get(pt[0] ++));
+        ifc.Add( ih.Assign(ndc0) );
+        id2ipv4Index[make_pair(g.routerId[0], 0)] = index ++;   // mbox MacTx
+        id2ipv4Index[make_pair(g.routerId[1], 0)] = index ++;   // tx router MacRx
+        ih.SetBase ("11.1.0.0", "255.255.255.0");
+
+        // tx router and rx router
         NetDeviceContainer ndc1;
         ndc1.Add(routerDevice.Get(pt[0] ++));
         ndc1.Add(routerDevice.Get(pt[0] ++));
         ifc.Add( ih.Assign(ndc1) );
-        id2ipv4Index[make_pair(g.routerId[0], 0)] = index ++;
-        id2ipv4Index[make_pair(g.routerId[1], 0)] = index ++;
-        // ih.NewNetwork();
-        ih.SetBase ("11.1.0.0", "255.255.255.0");
+        id2ipv4Index[make_pair(g.routerId[1], 1)] = index ++;   // tx router MacTx (late created)
+        id2ipv4Index[make_pair(g.routerId[2], 0)] = index ++;   // rx router MacRx
+        ih.SetBase ("12.1.0.0", "255.255.255.0");
 
         for(uint32_t j = 0; j < g.txId.size(); j ++)
         {
-            // tx and left router address
+            // mbox and left router address
             NetDeviceContainer ndc2;
             ndc2.Add(txDevice.Get(pt[1] ++));
             ndc2.Add(txRouterDevice.Get(pt[2] ++));
             ifc.Add( ih.Assign(ndc2) );
             id2ipv4Index[make_pair(g.txId[j], 0)] = index ++;
-            id2ipv4Index[make_pair(g.routerId[0], j + 1)] = index ++;
+            id2ipv4Index[make_pair(g.routerId[0], j + 1)] = index ++;   // note: mbox is leftmost
             ih.NewNetwork();
         }
-        // ih.NewNetwork();
-        ih.SetBase ("12.1.0.0", "255.255.255.0");
+        ih.SetBase ("13.1.0.0", "255.255.255.0");
         for(uint32_t j = 0; j < g.rxId.size(); j ++)
         {
             // rx and right router address
@@ -401,7 +446,7 @@ Ipv4InterfaceContainer RunningModule::setAddress()
             ndc3.Add(rxRouterDevice.Get(pt[4] ++));
             ndc3.Add(rxDevice.Get(pt[3] ++));
             ifc.Add( ih.Assign(ndc3) );
-            id2ipv4Index[make_pair(g.routerId[1], j + 1)] = index ++;
+            id2ipv4Index[make_pair(g.routerId[2], j + 1)] = index ++;
             id2ipv4Index[make_pair(g.rxId[j], 0)] = index ++;
             ih.NewNetwork();
         }
@@ -414,11 +459,14 @@ Ipv4InterfaceContainer RunningModule::setAddress()
                                t == 2? groups[i].rxId: groups[i].routerId;
         ss << type2name[t] << ": " << endl;
         for(uint32_t j = 0; j < ids.size(); j ++)
-        for(uint32_t k = 0; k < GetNode(i, ids[j])->GetNDevices() - 1; k ++)
         {
-            ss << "       ";
-            ifc.GetAddress( id2ipv4Index[make_pair(ids[j], k)] ).Print(ss);
-            ss << endl;
+            for(uint32_t k = 0; k < GetNode(i, ids[j])->GetNDevices() - 1; k ++)
+            {
+                ss << "       ";
+                ifc.GetAddress( id2ipv4Index[make_pair(ids[j], k)] ).Print(ss);
+                ss << endl;
+            }
+            ss << "     ---------------     " << endl;
         }
     }
 
@@ -611,10 +659,10 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
         // MiddlePoliceBox& mb = mboxes.at(i);         // not sure
-        Ptr<NetDevice> txRouter = GetNode(i, grp[i].routerId[0])->GetDevice(0);
-        Ptr<NetDevice> rxRouter = GetNode(i, grp[i].routerId[1])->GetDevice(0);
+        Ptr<NetDevice> txRouter = GetNode(i, grp[i].routerId[0])->GetDevice(0);     // 3 router scenario: txRouter is the 1st one
+        Ptr<NetDevice> rxRouter = GetNode(i, grp[i].routerId[2])->GetDevice(0);
         Ptr<Node> txNode = GetNode(i, grp[i].routerId[0]);
-        Ptr<Node> rxNode = GetNode(i, grp[i].routerId[1]);
+        Ptr<Node> rxNode = GetNode(i, grp[i].routerId[2]);
         NetDeviceContainer nc;
         for(uint32_t j = 1; j <= grp[i].txId.size(); j ++)
             nc.Add(txNode->GetDevice(j));               // add rx side devices, this line will add the loop back
@@ -631,7 +679,8 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         {
             double bnDelay = (bottleneckDelay.at(i).c_str()[0] - '0') / 1000.0;
             double dely = (delay.c_str()[0] - '0') / 1000.0;
-            NS_LOG_INFO("rtt[" + to_string(j) + "]: " + to_string(2 *(bnDelay + 2 * dely)));
+            double nRouter = 3;
+            NS_LOG_INFO("rtt[" + to_string(j) + "]: " + to_string(2 *(bnDelay + nRouter * dely)));        // router is 3 now
             rtts.push_back(2 * (bnDelay + 2 * dely) );
         }
         mboxes.at(i).SetWeight(grp.at(i).weight);
@@ -657,7 +706,7 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
        
 
         rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes.at(i)));
-        qc.Get(i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
+        qc.Get(2 * i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
         txRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMboxAck, &mboxes.at(i)));    // test passeds
     
         // debug packet path
@@ -670,7 +719,11 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
 
 
         // debug queue size
-        qc.Get(i)->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::TcPktInQ, &mboxes.at(i)));
+        qc.Get(2 * i)->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::TcPktInQ, &mboxes.at(i)));
+        qc.Get(2 * i + 1)->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::TcPktInRed, &mboxes.at(i)));
+        qc.Get(2 * i)->TraceConnectWithoutContext("TokensInFirstBucket", MakeCallback (&FirstBucketTrace));
+        // qc.Get(2 * i)->TraceConnectWithoutContext("TokensInSecondBucket", MakeCallback (&SecondBucketTrace));
+
         Ptr<Queue<Packet>> qp = DynamicCast<PointToPointNetDevice> (txRouter) -> GetQueue();
         qp->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::DevPktInQ, &mboxes.at(i)));
 
@@ -686,7 +739,7 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         }
 
         // test the rx side device index
-        Ptr<Node> rtNode = GetNode(i, grp[i].routerId[1]);
+        Ptr<Node> rtNode = GetNode(i, grp[i].routerId[2]);
         cout << " rx0: # dev: " << rtNode->GetNDevices() << "; # rx: " << grp.at(i).rxId.size() << endl;
         for(uint32_t k = 0; k < rtNode->GetNDevices() - 2; k ++)
         {
@@ -705,7 +758,8 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
 
 
         // flow control
-        mboxes.at(i).flowControl(mboxes.at(i).GetFairness(), interval, logInterval, ruInterval);
+        Ptr<QueueDisc> tbfq = qc.Get(2 * i);
+        mboxes.at(i).flowControl(mboxes.at(i).GetFairness(), interval, logInterval, ruInterval, tbfq);
     }
 }
 
@@ -796,6 +850,7 @@ int main (int argc, char *argv[])
     srand(time(0));
     Packet::EnablePrinting ();          // enable printing the metadata of packet
     Packet::EnableChecking ();
+    tokenOut.open ("token_out.dat", ios::out);
 
     // define the test options and parameteres
     ProtocolType pt = UDP;
@@ -892,7 +947,7 @@ int main (int argc, char *argv[])
 
     if(nTx == 2 && nGrp == 1) // group: 2*1, 1
     {
-        rtid = {5, 6};
+        rtid = {4, 5, 6};
         tx2rate1 = {{1, "200Mbps"}, {2, "200Mbps"}};
         // tx2rate1 = {{1, "0.01Mbps"}, {2, "20Mbps"}};               // for TCP drop debug only!
         rxId1 = {7, 8};
@@ -906,7 +961,7 @@ int main (int argc, char *argv[])
     }
     else if(nTx == 4 && nGrp == 1) // group: 2*2, 1
     {
-        rtid = {5, 6};
+        rtid = {11, 5, 6};
         tx2rate1 = {{1, "200Mbps"}, {2, "200Mbps"}, {3, "400Mbps"}, {4, "400Mbps"}};
         rxId1 = {7, 8, 9, 10};
         rate2port1 = {{"200Mbps", 80}, {"400Mbps", 90}};
@@ -917,7 +972,7 @@ int main (int argc, char *argv[])
     }
     else if(nTx == 3 && nGrp == 1) // group: 3, 1
     {
-        rtid = {5, 6};
+        rtid = {4, 5, 6};
         tx2rate1 = {{1, "100Mbps"}, {2, "100Mbps"}, {3, "100Mbps"}};
         rxId1 = {7, 8, 9};
         rate2port1 = {{"100Mbps", 80}};
@@ -929,7 +984,7 @@ int main (int argc, char *argv[])
     }
     else if(nTx == 3 && nGrp == 2) // group: 3, 2
     {
-        rtid = {25, 49};
+        rtid = {25, 49, 81};
         tx2rate1 = {{10, "200Mbps"}, {11, "400Mbps"}};
         rxId1 = {2,3};
         rate2port1 = {{"200Mbps", 80}, {"400Mbps", 90}};
@@ -947,7 +1002,7 @@ int main (int argc, char *argv[])
     }
     else if(nTx == 10)
     {
-        rtid = {95, 96};
+        rtid = {95, 96, 97};
         for(int i = 0; i < 10; i ++)
         {
             tx2rate1[i] = "100Mbps";
@@ -963,7 +1018,7 @@ int main (int argc, char *argv[])
     }
     else if (nGrp == 1)
     {
-        rtid = {95, 96};
+        rtid = {95, 96, 97};
         for(int i = 0; i < nTx; i ++)
         {
             tx2rate1[i] = "100Mbps";
@@ -987,12 +1042,12 @@ int main (int argc, char *argv[])
     t[0] = 0.0;
     t[1] = tStop;
     t[2] = 0.0;             // flow 0 start later than other flows
-    // for(uint32_t i = 3; i < 2*N + 2; i ++)      // Debug: 0, 10, 20s
-    // {
-    //     if(i < N + 2) t[i] = (i - 2) * 10;
-    //     else t[i] = tStop;
-    //     cout << i << ": " << t[i] << endl;
-    // }
+    for(uint32_t i = 3; i < 2*N + 2; i ++)      // Debug: 0, 10, 20s
+    {
+        if(i < N + 2) t[i] = (i - 2) * 10;
+        else t[i] = tStop - (2*N + 1 - i) * 10;
+        cout << i << ": " << t[i] << endl;
+    }
 
     // Experiment setting: start: 0, 50, 100; stop: 400, 450, 500 (s)
     // for (uint32_t i = 3; i < 2*N + 2; i ++)
@@ -1003,11 +1058,11 @@ int main (int argc, char *argv[])
     // }
 
     // Normal case: stop at specified time
-    for (uint32_t i = 3; i < 2*N + 2; i ++)
-    {
-        if (i > N + 1) t[i] = tStop;
-        else t[i] = 0.0;
-    }
+    // for (uint32_t i = 3; i < 2*N + 2; i ++)
+    // {
+    //     if (i > N + 1) t[i] = tStop;
+    //     else t[i] = 0.0;
+    // }
 
 
     // running module construction
@@ -1067,6 +1122,7 @@ int main (int argc, char *argv[])
 
     cout << " MID: " << MID1 << "," << MID2 << " Destroying ..." << endl << endl;
     flowmon->SerializeToXmlFile ("mrun.flowmon", false, false);
+    tokenOut.close();
     Simulator::Destroy();
 
     return 0;

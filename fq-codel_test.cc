@@ -36,7 +36,7 @@
 using namespace std;
 using namespace ns3;
 
-fstream tokenOut;
+fstream fqout, devout;
 
 // tool function to obtain the source IP address
 Ipv4Address getIpSrcAddr (Ptr<const Packet> p)   // ip layer information, work for both TCP and UDP
@@ -61,11 +61,18 @@ vector<uint32_t> getPktSize (Ptr<const Packet> p)
     return res;
 }
 
-void FirstBucketTrace (uint32_t oldV, uint32_t newV)
+void PacketUpdate (uint32_t oldV, uint32_t newV)
 {
     double time = Simulator::Now().GetSeconds();
-    cout << time << ":        # tokens in 1st bucket:    " << newV << endl;
-    tokenOut << time << " " << newV << endl;
+    cout << time << ": FQ:  " << oldV << " -> " << newV << endl;
+    fqout << time << " " << newV << endl;
+}
+
+void DevPktUpdate (uint32_t oldV, uint32_t newV)
+{
+    double time = Simulator::Now().GetSeconds();
+    cout << time << ": Dev:  " << oldV << " -> " << newV << endl;
+    devout << time << " " << newV << endl;
 }
 
 void onRightRx (Ptr<const Packet> p)
@@ -84,21 +91,15 @@ void onLeftRx (Ptr<const Packet> p)
     cout << " (" << getPktSize (p)[0] << " B) " << endl;
 }
 
-void setTokenRate (string newRate, Ptr<QueueDisc> q)
-{
-    cout << Simulator::Now().GetSeconds() << ": set token rate to " << newRate << endl;
-    q->SetAttribute("Rate", StringValue(newRate));
-}
-
 int main()
 {
     // link settings
-    uint32_t nLeaf = 2;
-    string txRate = "80Mbps";    // app sending rate
+    uint32_t nLeaf = 1;
+    string txRate = "80kbps";    // 10 pkt / s
     uint32_t port = 5001;
-    string linkBw = "50Mbps";
+    string linkBw = "16kbps";     // 2 pkt / s
     string linkDelay = "2ms";
-    double tStop = 20.0;
+    double tStop = 3.0;
     
     // tbf queue settings
     QueueSizeUnit mode = QueueSizeUnit::PACKETS;    // directly set in code
@@ -107,8 +108,6 @@ int main()
     uint32_t qSize = 20;        // 1000 by ns-3 default
     uint32_t burst = 100000;      // 1st bucket size
     uint32_t mtu = 0;           // 2nd bucket size (0 if none)
-    DataRate token_rate = DataRate ("10Mbps");   // i.e. leak rate of 1st bucket
-    DataRate peakRate = DataRate ("1Gbps");     // i.e. leak rate of 2nd bucket
 
     if (mode == QueueSizeUnit::BYTES)
     {
@@ -131,12 +130,9 @@ int main()
 
     // set TBF queue (note: traffic from right to left)
     TrafficControlHelper tch;
-    tch.SetRootQueueDisc ("ns3::TbfQueueDisc",
-                          "MaxSize", QueueSizeValue (QueueSize (mode, qSize)),
-                          "Burst", UintegerValue (burst),
-                          "Mtu", UintegerValue (mtu),
-                          "Rate", DataRateValue (token_rate),
-                          "PeakRate", DataRateValue (peakRate));
+    tch.SetRootQueueDisc ("ns3::FqCoDelQueueDisc",
+                          "DropBatchSize", UintegerValue(1),
+                          "Perturbation", UintegerValue(256));
     tch.Install (d.GetLeft ()->GetDevice (0));
     QueueDiscContainer qdc = tch.Install (d.GetRight ()->GetDevice (0));
 
@@ -158,8 +154,8 @@ int main()
     OnOffHelper ooh ("ns3::UdpSocketFactory", Address ());
     ooh.SetAttribute ("DataRate", StringValue (txRate));
     ooh.SetAttribute ("PacketSize", UintegerValue (pktSize));
-    ooh.SetAttribute ("OnTime", StringValue ("ns3::UniformRandomVariable[Min=0.|Max=1.]"));
-    ooh.SetAttribute ("OffTime", StringValue ("ns3::UniformRandomVariable[Min=0.|Max=0.]"));
+    ooh.SetAttribute ("OnTime", StringValue ("ns3::ConstantRandomVariable[Constant=1]"));
+    ooh.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0.1]"));
     ApplicationContainer clientApps;
     for (uint32_t i = 0; i < d.RightCount (); ++i)
     {
@@ -171,17 +167,19 @@ int main()
     clientApps.Stop (Seconds (tStop));
 
     // output token size for visualization
-    tokenOut.open ("token_out.dat", ios::out);
+    fqout.open ("fq_out.dat", ios::out);
+    devout.open ("dev_out.dat", ios::out);
 
     // tracing: right router's MacRx, queue's token, left router's MacRx
-    qdc.Get (0)->TraceConnectWithoutContext ("TokensInFirstBucket", MakeCallback (&FirstBucketTrace));
+    qdc.Get (0)->TraceConnectWithoutContext ("PacketsInQueue", MakeCallback(&PacketUpdate));
+    Ptr<NetDevice> txRouter = d.GetRight()->GetDevice(0);
+    Ptr<Queue<Packet>> qp = DynamicCast<PointToPointNetDevice> (txRouter) -> GetQueue();
+    qp->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&DevPktUpdate));
+
     for (uint32_t i = 0; i < d.RightCount (); ++i)
         d.GetRight ()->GetDevice (i + 1)->TraceConnectWithoutContext ("MacRx", MakeCallback (&onRightRx));
     d.GetLeft ()->GetDevice (0)->TraceConnectWithoutContext ("MacRx", MakeCallback (&onLeftRx));
 
-    // test: schedule the modification of token rate
-    string newRate = "20Mbps";
-    Simulator::Schedule(Seconds(10), &setTokenRate, newRate, qdc.Get(0));
 
     // set simulation
     Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
@@ -190,7 +188,8 @@ int main()
     Simulator::Run ();
 
     cout << "\nDestroying the simulation ... " << endl;
-    tokenOut.close ();
+    fqout.close ();
+    devout.close ();
     Simulator::Destroy ();
     return 0;
 }
