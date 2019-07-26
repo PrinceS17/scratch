@@ -92,7 +92,7 @@ int
 main (int argc, char *argv[])
 {
     double tStop = 10;
-    uint32_t nLeaf = 1;
+    uint32_t nLeaf = 3;
     uint32_t burst = 10000;
     uint32_t mtu = 2000;
     string txRate = "80kbps";       // 10 pkt /s 

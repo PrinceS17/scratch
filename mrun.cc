@@ -33,6 +33,7 @@ void FirstBucketTrace (uint32_t oldV, uint32_t newV)
 {
     double time = Simulator::Now().GetSeconds();
     tokenOut << time << " " << newV << endl;
+    cout << time << ": first bucket " << newV << endl;
 }
 
 void SecondBucketTrace (uint32_t oldV, uint32_t newV)
@@ -356,13 +357,12 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
     QueueDiscContainer qc;
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
-        TrafficControlHelper tbf_tch;           // TBF queue
-        tbf_tch.SetRootQueueDisc ("ns3::TbfQueueDisc",
-                            "MaxSize", QueueSizeValue (QueueSize (QueueSizeUnit::PACKETS , 500)),    // hard coded for debug
-                            "Burst", UintegerValue (100000),    // 100B, test
-                            // "Mtu", StringValue ("2000"),             // 2nd bucket size, not the mtu here
-                            "Rate", StringValue (token_rate),
-                            "PeakRate", StringValue (peak_rate));
+        TrafficControlHelper fq_tch;
+        fq_tch.SetRootQueueDisc ("ns3::FqTbfQueueDisc",
+                                 "MaxSize", QueueSizeValue (QueueSize ("1000p")),
+                                 "Burst", UintegerValue (100000),
+                                 "Rate", StringValue (token_rate),
+                                 "PeakRate", StringValue (peak_rate));
 
         TrafficControlHelper red_tch;
         if(Th.empty()) red_tch.SetRootQueueDisc("ns3::RedQueueDisc", 
@@ -382,7 +382,7 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
         Ptr<NetDevice> mbRouter = routerDevice.Get(0);
         Ptr<NetDevice> txRouter = routerDevice.Get(2);
 
-        qc.Add(tbf_tch.Install(mbRouter));
+        qc.Add(fq_tch.Install(mbRouter));
         qc.Add(red_tch.Install(txRouter));
         cout << "type id of queue: " << qc.Get(0)->GetInstanceTypeId() << ", " << 
             qc.Get(1)->GetInstanceTypeId() << endl;
@@ -721,7 +721,11 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         // debug queue size
         qc.Get(2 * i)->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::TcPktInQ, &mboxes.at(i)));
         qc.Get(2 * i + 1)->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::TcPktInRed, &mboxes.at(i)));
-        qc.Get(2 * i)->TraceConnectWithoutContext("TokensInFirstBucket", MakeCallback (&FirstBucketTrace));
+        
+        Ptr<FqTbfQueueDisc> fqp = DynamicCast<FqTbfQueueDisc> (qc.Get(2 * i));      // trial of the interval TBF queue tracing
+        Config::ConnectWithoutContext ("/NodeList/*/$ns3::TrafficControlLayer/RootQueueDiscList/*/InternalQueueList/0/TokensInFirstBucket", MakeCallback (&FirstBucketTrace));
+        
+        // qc.Get(2 * i)->TraceConnectWithoutContext("TokensInFirstBucket", MakeCallback (&FirstBucketTrace));
         // qc.Get(2 * i)->TraceConnectWithoutContext("TokensInSecondBucket", MakeCallback (&SecondBucketTrace));
 
         Ptr<Queue<Packet>> qp = DynamicCast<PointToPointNetDevice> (txRouter) -> GetQueue();
@@ -853,7 +857,7 @@ int main (int argc, char *argv[])
     tokenOut.open ("token_out.dat", ios::out);
 
     // define the test options and parameteres
-    ProtocolType pt = UDP;
+    ProtocolType pt = TCP;
     int TCP_var = 1;
     FairType fairness = PRIORITY;
     bool isTrackPkt = false;
@@ -974,8 +978,10 @@ int main (int argc, char *argv[])
     {
         rtid = {4, 5, 6};
         tx2rate1 = {{1, "100Mbps"}, {2, "100Mbps"}, {3, "100Mbps"}};
+        // tx2rate1 = {{1, "20Mbps"}, {2, "20Mbps"}, {3, "20Mbps"}};       // 20 Mbps for easy debugging
         rxId1 = {7, 8, 9};
         rate2port1 = {{"100Mbps", 80}};
+        // rate2port1 = {{"20Mbps", 80}};
         // weight = {0.6, 0.2, 0.2};
         weight = {0.6, 0.3, 0.1};
         g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
@@ -1042,12 +1048,12 @@ int main (int argc, char *argv[])
     t[0] = 0.0;
     t[1] = tStop;
     t[2] = 0.0;             // flow 0 start later than other flows
-    for(uint32_t i = 3; i < 2*N + 2; i ++)      // Debug: 0, 10, 20s
-    {
-        if(i < N + 2) t[i] = (i - 2) * 10;
-        else t[i] = tStop - (2*N + 1 - i) * 10;
-        cout << i << ": " << t[i] << endl;
-    }
+    // for(uint32_t i = 3; i < 2*N + 2; i ++)      // Debug: 0, 10, 20s
+    // {
+    //     if(i < N + 2) t[i] = (i - 2) * 10;
+    //     else t[i] = tStop - (2*N + 1 - i) * 10;
+    //     cout << i << ": " << t[i] << endl;
+    // }
 
     // Experiment setting: start: 0, 50, 100; stop: 400, 450, 500 (s)
     // for (uint32_t i = 3; i < 2*N + 2; i ++)
@@ -1058,16 +1064,19 @@ int main (int argc, char *argv[])
     // }
 
     // Normal case: stop at specified time
-    // for (uint32_t i = 3; i < 2*N + 2; i ++)
-    // {
-    //     if (i > N + 1) t[i] = tStop;
-    //     else t[i] = 0.0;
-    // }
+    for (uint32_t i = 3; i < 2*N + 2; i ++)
+    {
+        if (i > N + 1) t[i] = tStop;
+        else t[i] = 0.0;
+    }
 
 
     // running module construction
     LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
     LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);
+    LogComponentEnable("FqTbfQueueDisc", LOG_INFO);
+    // LogComponentEnable("QueueDisc", LOG_FUNCTION);
+
     cout << "Initializing running module..." << endl;
     RunningModule rm(t, grps, pt, bnBw, bnDelay, "2ms", {isTrackPkt, isBypass}, 1000);
     cout << "Building topology ... " << endl;
