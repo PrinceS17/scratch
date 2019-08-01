@@ -352,8 +352,8 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
     // set RED queue and TBFQ
     // string token_rate = "50Mbps";
     // string peak_rate = "50Mbps";
-    string token_rate = "1Gbps";
-    string peak_rate = "1Gbps"; 
+    string token_rate = "10Gbps";
+    string peak_rate = "10Gbps"; 
     QueueDiscContainer qc;
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
@@ -363,6 +363,12 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
                                  "Burst", UintegerValue (100000),
                                  "Rate", StringValue (token_rate),
                                  "PeakRate", StringValue (peak_rate));
+
+        // fq_tch.SetRootQueueDisc("ns3::RedQueueDisc", 
+        //                          "MinTh", DoubleValue(5),
+        //                          "MaxTh", DoubleValue(15),
+        //                          "LinkBandwidth", StringValue(token_rate),
+        //                          "LinkDelay", StringValue("1ms"));
 
         TrafficControlHelper red_tch;
         if(Th.empty()) red_tch.SetRootQueueDisc("ns3::RedQueueDisc", 
@@ -857,7 +863,7 @@ int main (int argc, char *argv[])
     tokenOut.open ("token_out.dat", ios::out);
 
     // define the test options and parameteres
-    ProtocolType pt = TCP;
+    ProtocolType pt = UDP;
     int TCP_var = 1;
     FairType fairness = PRIORITY;
     bool isTrackPkt = false;
@@ -1073,8 +1079,8 @@ int main (int argc, char *argv[])
 
     // running module construction
     LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
-    LogComponentEnable("MiddlePoliceBox", LOG_LEVEL_INFO);
-    LogComponentEnable("FqTbfQueueDisc", LOG_INFO);
+    LogComponentEnable("MiddlePoliceBox", LOG_INFO);
+    // LogComponentEnable("FqTbfQueueDisc", LOG_INFO);
     // LogComponentEnable("QueueDisc", LOG_FUNCTION);
 
     cout << "Initializing running module..." << endl;
