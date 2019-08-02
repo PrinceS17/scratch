@@ -517,13 +517,14 @@ Ipv4InterfaceContainer RunningModule::setAddress()
 ApplicationContainer RunningModule::setSink(vector<Group> grp, ProtocolType pt)
 {
     NS_LOG_FUNCTION("Begin.");
-    string ptStr = pt == TCP? "ns3::TcpSocketFactory":"ns3::UdpSocketFactory";
+    // string ptStr = pt == TCP? "ns3::TcpSocketFactory":"ns3::UdpSocketFactory";
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
         Group g = grp.at(i);
         for(uint32_t j = 0; j < g.txId.size(); j ++)
         {
             uint32_t tid = g.txId.at(j);
+            string ptStr = g.tx2prot[tid] == TCP? "ns3::TcpSocketFactory":"ns3::UdpSocketFactory";
             uint32_t port = g.rate2port[ g.tx2rate[tid] ];
             Address sinkLocalAddr (InetSocketAddress(Ipv4Address::GetAny(), port));
             PacketSinkHelper psk(ptStr, sinkLocalAddr);
@@ -569,15 +570,20 @@ vector< CapabilityHelper > RunningModule::setCapabilityHelper(vector<Group> grp)
             Ptr<Node> rx_node = GetNode(i, rx_id);
             Ptr<NetDevice> rx_device = rx_node->GetDevice(0);
             
-            CapabilityHelper tmp;
-            chelpers.push_back(tmp);
-            chelpers.at(idx).install(ri, rx_node, rx_device, sourceAddr);
-            
-            idx ++;
-
             ss << "   - Dbg: IPv4 address: ";
             addr.Print(ss);
+            if (g.tx2prot[tId] == UDP)          // flow oriented
+            {
+                CapabilityHelper tmp;
+                chelpers.push_back(tmp);
+                chelpers.at(idx ++).install(ri, rx_node, rx_device, sourceAddr);
+                ss << ". Capability helper instaled!";
+            }
             ss << endl;
+
+            // by the way, set ipv4 -> protocol mapping
+            ip2prot[addr] = g.tx2prot[tId];
+
         }
     }
     NS_LOG_INFO(ss.str());
@@ -633,14 +639,15 @@ Ptr<MyApp> RunningModule::netFlow(uint32_t i, uint32_t tId, uint32_t rId, uint32
     // parse rate and port
     Group g = groups.at(i);
     string rate = g.tx2rate.at(tId);
+    TypeId tpid = g.tx2prot[tId] == TCP? TcpSocketFactory::GetTypeId():UdpSocketFactory::GetTypeId();
     uint32_t port = g.rate2port.at(rate);
+    
     uint32_t ri = find(g.rxId.begin(), g.rxId.end(), rId) - g.rxId.begin();
     uint32_t ti = find(g.txId.begin(), g.txId.end(), tId) - g.txId.begin();
 
     // set socket
-    TypeId tpid = protocol == TCP? TcpSocketFactory::GetTypeId():UdpSocketFactory::GetTypeId();
     Ptr<Socket> skt = Socket::CreateSocket(GetNode(i, tId), tpid); 
-    if(protocol == TCP) skt->SetAttribute ("Sack", BooleanValue (false));
+    if(g.tx2prot[tId] == TCP) skt->SetAttribute ("Sack", BooleanValue (false));
     Address sinkAddr(InetSocketAddress(GetIpv4Addr(i, rId), port));
     
     Ptr<MyApp> app = CreateObject<MyApp> ();
@@ -951,6 +958,7 @@ int main (int argc, char *argv[])
     vector<uint32_t> txId1;
     vector<uint32_t> rtid, rtid2, rxId1, rxId2;
     map<uint32_t, string> tx2rate1, tx2rate2;
+    map<uint32_t, ProtocolType> tx2prot1, tx2prot2;
     map<string, uint32_t> rate2port1, rate2port2;
     Group g1, g2;
     vector<Group> grps;
@@ -963,9 +971,12 @@ int main (int argc, char *argv[])
         rxId1 = {7, 8};
         rate2port1 = {{"200Mbps", 80}, {"200Mbps", 90}};
         // rate2port1 = {{"0.01Mbps", 80}, {"20Mbps", 90}};           // for TCP drop debug only!
+        
         // weight = {0.7, 0.3};
         weight = vector<double> (wt.begin(), wt.begin() + 2);
-        g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);      // skeptical
+
+        tx2prot1 = {{1, TCP}, {2, TCP}};
+        g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);      // skeptical
         g1.insertLink({1, 2}, {7, 8});
         grps = {g1};
     }
@@ -976,7 +987,8 @@ int main (int argc, char *argv[])
         rxId1 = {7, 8, 9, 10};
         rate2port1 = {{"200Mbps", 80}, {"400Mbps", 90}};
         weight = {0.4, 0.3, 0.2, 0.1};
-        g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
+        tx2prot1 = {{1, TCP}, {2, TCP}, {3, UDP}, {4, UDP}};        // mixed
+        g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);
         g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
         grps = {g1};
     }
@@ -990,7 +1002,8 @@ int main (int argc, char *argv[])
         // rate2port1 = {{"20Mbps", 80}};
         // weight = {0.6, 0.2, 0.2};
         weight = {0.6, 0.3, 0.1};
-        g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
+        tx2prot1 = {{1, TCP}, {2, TCP}, {3, UDP}};                  // mixed
+        g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);
         g1.insertLink({1, 2, 3}, {7, 8, 9});
         grps = {g1};
     }
@@ -1001,14 +1014,16 @@ int main (int argc, char *argv[])
         rxId1 = {2,3};
         rate2port1 = {{"200Mbps", 80}, {"400Mbps", 90}};
         weight = {0.7, 0.3};
-        g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
+        tx2prot1 = {{10, TCP}, {11, TCP}};
+        g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);
         g1.insertLink({10, 11}, {2, 3});
 
         rtid2 = {26, 50};
         tx2rate2 = {{10, "200Mbps"}, {12, "400Mbps"}};
         rxId2 = {2,4};
         rate2port2 = {{"200Mbps", 80}, {"400Mbps", 90}};
-        g2 = Group(rtid2, tx2rate2, rxId2, rate2port2, weight);
+        tx2prot2 = {{10, UDP}, {12, UDP}};
+        g2 = Group(rtid2, tx2rate2, tx2prot2, rxId2, rate2port2, weight);
         g2.insertLink({10, 12}, {2, 4});
         grps = {g1, g2};
     }
@@ -1018,12 +1033,13 @@ int main (int argc, char *argv[])
         for(int i = 0; i < 10; i ++)
         {
             tx2rate1[i] = "100Mbps";
+            tx2prot1[i] = UDP;
             txId1.push_back(i);
             rxId1.push_back(i + 10);
         }
         rate2port1 = {{"100Mbps", 80}};
         weight = {0.5, 0.055, 0.055, 0.055, 0.055, 0.056, 0.056, 0.056, 0.056, 0.056}; 
-        g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
+        g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);
         g1.insertLink(txId1, rxId1);
         grps = {g1};
         scale = 2e3;
@@ -1034,6 +1050,7 @@ int main (int argc, char *argv[])
         for(int i = 0; i < nTx; i ++)
         {
             tx2rate1[i] = "100Mbps";
+            tx2prot1[i] = UDP;
             txId1.push_back(i);
             rxId1.push_back(i + nTx);
         }
@@ -1041,7 +1058,7 @@ int main (int argc, char *argv[])
         weight.push_back(0.5);
         for(int i = 0; i < nTx - 1; i ++)
             weight.push_back(0.5 / (nTx - 1) );
-        g1 = Group(rtid, tx2rate1, rxId1, rate2port1, weight);
+        g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);
         g1.insertLink(txId1, rxId1);
         grps = {g1};
         scale = 2e3;

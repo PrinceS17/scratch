@@ -62,8 +62,8 @@ class Group
 {
 public:
     Group() = default;
-    Group(vector<uint32_t> rtid, map<uint32_t, string> tx2rate1, vector<uint32_t> rxId1, map<string, uint32_t> rate2port1, vector<double> w = vector<double>()):
-        routerId(rtid), tx2rate(tx2rate1), rxId(rxId1), rate2port(rate2port1)
+    Group(vector<uint32_t> rtid, map<uint32_t, string> tx2rate1, map<uint32_t, ProtocolType> tx2prot1, vector<uint32_t> rxId1, map<string, uint32_t> rate2port1, vector<double> w = vector<double>()):
+        routerId(rtid), tx2rate(tx2rate1), tx2prot(tx2prot1), rxId(rxId1), rate2port(rate2port1)
         {
             // some direct visit exist? no at least from stackoverflow
             // need unit testing!
@@ -98,6 +98,8 @@ public:
             copy(rates.begin(), rates.end(), ostream_iterator<string>(cout, " "));
             cout << "\nports: ";
             copy(ports.begin(), ports.end(), ostream_iterator<uint32_t>(cout, " "));
+            cout << "\nprotocols: ";
+            for (auto tp:tx2prot) cout << tp.first << ": " << (tp.second == TCP? "TCP":"UDP") << ", ";
             cout << "\nN: " << N << endl << endl;
         }
     Group(const Group &) = default;
@@ -125,6 +127,7 @@ public:
     multimap <uint32_t, uint32_t> tx2rx;        // tx-rx node map: m-in-n-out map, test m!=n in later version
     map <string, vector<uint32_t>> rate2tx;     // sort each node by its data rate (like client, attacker before)
     map <uint32_t, string> tx2rate;             // tx node to rate
+    map <uint32_t, ProtocolType> tx2prot;       // tx node to transport protocol 
     map <string, uint32_t> rate2port;           // port for every rate level (abstract for client and attacker)
 
     vector <double> weight;                     // weight for each sender (current version)
@@ -273,22 +276,28 @@ public:
     void stop();
 
     /**
-     * \brief Set node given group and id.
+     * \brief Create node given group and id.
      * 
-     * \param pn The node to set.
      * \param i The index of group in groups.
      * \param id Node id in group g.
+     * \return Index of nodes.
      */
-    void SetNode(Ptr<Node> pn, uint32_t i, uint32_t id);
+    uint32_t SetNode(uint32_t i, uint32_t id);
     /**
-     * \brief Set node given group and n (inside group No. ).
+     * \brief Create node given group and n (inside group No. ).
      * 
-     * \param pn The node to set.
-     * \param type The type of node: sender/receiver/router: 0/1/2.
+     * \param type The type of node: sender/receiver/router: 0/1.
      * \param i The index of group in groups.
      * \param n The inside group No. 
+     * \return Index of nodes.
      */
-    void SetNode(Ptr<Node> pn, uint32_t type, uint32_t i, uint32_t n);
+    uint32_t SetNode(uint32_t type, uint32_t i, uint32_t n);
+    /**
+     * \brief Set the pointer of router into node.
+     * 
+     * \param 
+     */
+    uint32_t SetRouter(Ptr<Node> pt, uint32_t i, uint32_t id);
     /**
      * \brief Get node from group and id. Should be exactly inverse of SetNode();
      * 
@@ -296,15 +305,14 @@ public:
      * \param id Node id in group g.
      */
     Ptr<Node> GetNode(uint32_t i, uint32_t id);
-
-    Ptr<Node> GetRouter(uint32_t i, bool ifTx);
     /**
      * \brief Get ipv4 address for socket destination setting.
      * 
      * \param i The index of group in groups.
+     * \param k The No. of the device installed on that node (maybe larger than 0).
      * \param id Node id in group g. 
      */
-    Ipv4Address GetIpv4Addr(uint32_t i, uint32_t id);
+    Ipv4Address GetIpv4Addr(uint32_t i, uint32_t id, uint32_t k = 0);
     void txSink(Ptr<const Packet> p);   // !< for test and debug
     void onCwndChange(string context, uint32_t oldValue, uint32_t newValue);
     uint32_t GetId();
@@ -312,18 +320,29 @@ public:
     
 public:         // network entity
     NodeContainer nodes;        // all nodes in the topology
-    NodeContainer sender;       // fetch each group by index/id
-    NodeContainer receiver;
-    NodeContainer router;
+    NodeContainer routers;
+    NetDeviceContainer txDevice;
+    NetDeviceContainer rxDevice;
+    NetDeviceContainer txRouterDevice;
+    NetDeviceContainer rxRouterDevice;
+    NetDeviceContainer routerDevice;
+
+    map< uint32_t, uint32_t > id2nodeIndex;     // mapping from node ID (tx/rx/rt ID) to the index in NodeContainer
     
     QueueDiscContainer qc;          // queue container for trace
     Ipv4InterfaceContainer ifc;     // ipv4 interface container for flow destination specification
+    map< pair<uint32_t,uint32_t>, uint32_t > id2ipv4Index;     // mapping from node ID and device No. to index of ipv4 container
+    
+    map<Ipv4Address, ProtocolType> ip2prot;
+
     ApplicationContainer sinkApp;   // sink app
     vector< CapabilityHelper > chelpers;    // capability helpers on RX nodes
     vector< Ptr<MyApp> > senderApp;   // sender app: need testing!
 
     vector<PointToPointDumbbellHelper> dv;  // use to preserve channel information
     vector<MiddlePoliceBox> mboxes;         // use to make the mboxes consistent
+
+    PointToPointHelper bottleneck;
 
 private:        // parameters
     // basic
