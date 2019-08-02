@@ -577,7 +577,7 @@ vector< CapabilityHelper > RunningModule::setCapabilityHelper(vector<Group> grp)
                 CapabilityHelper tmp;
                 chelpers.push_back(tmp);
                 chelpers.at(idx ++).install(ri, rx_node, rx_device, sourceAddr);
-                ss << ". Capability helper instaled!";
+                ss << ". Capability helper installed!";
             }
             ss << endl;
 
@@ -595,6 +595,7 @@ vector< CapabilityHelper > RunningModule::setCapabilityHelper(vector<Group> grp)
         Group g = grp.at(i);
         for (uint32_t j = 0; j < g.txId.size(); j ++)
         {
+            if (g.tx2prot[g.txId[j]] != UDP) continue;
             uint32_t rId = g.rxId[j];
             uint32_t ri = j;
             Ptr<Node> rx_node = GetNode(i, rId);
@@ -686,6 +687,9 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
 
         NS_LOG_FUNCTION("Mbox installed on router " + to_string(i));
         
+        // given flow type infomation
+        mboxes.at(i).ip2prot = ip2prot;
+
         // set weight, rtt, rto & start mbox
         vector<double> rtts;
         for(uint32_t j = 0; j < grp.at(i).txId.size(); j ++)
