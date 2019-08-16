@@ -1006,7 +1006,10 @@ int main (int argc, char *argv[])
         // rate2port1 = {{"20Mbps", 80}};
         // weight = {0.6, 0.2, 0.2};
         weight = {0.6, 0.3, 0.1};
+        // tx2prot1 = {{1, UDP}, {2, UDP}, {3, UDP}};                  // pure UDP
+        // tx2prot1 = {{1, TCP}, {2, TCP}, {3, TCP}};                  // pure TCP
         tx2prot1 = {{1, TCP}, {2, TCP}, {3, UDP}};                  // mixed
+
         g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);
         g1.insertLink({1, 2, 3}, {7, 8, 9});
         grps = {g1};
