@@ -892,6 +892,8 @@ int main (int argc, char *argv[])
     double alpha;
     uint32_t maxPkts = 1;
     double scale = 5e3;
+    int nProtocol = 0;              // No. of scenario like TTT, TTU
+    double estep = 20;
 
     // specify the TCP socket type in ns-3
     if(TCP_var == 1) Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));  
@@ -921,6 +923,8 @@ int main (int argc, char *argv[])
     cmd.AddValue ("rInt", "Rate update interval", rateUpInterval);
     cmd.AddValue ("weight1", "weight[1] for 2 weight run", wt[0]);
     cmd.AddValue ("weight2", "weight[2] for 2 weight run", wt[1]);
+    cmd.AddValue ("nProtocol", "No. of the protocol", nProtocol);
+    cmd.AddValue ("eStep", "Step for UDP exploration", estep);               // explore step of UDP 
 
     cmd.Parse (argc, argv);
 
@@ -1006,9 +1010,38 @@ int main (int argc, char *argv[])
         // rate2port1 = {{"20Mbps", 80}};
         // weight = {0.6, 0.2, 0.2};
         weight = {0.6, 0.3, 0.1};
-        // tx2prot1 = {{1, UDP}, {2, UDP}, {3, UDP}};                  // pure UDP
-        // tx2prot1 = {{1, TCP}, {2, TCP}, {3, TCP}};                  // pure TCP
-        tx2prot1 = {{1, TCP}, {2, TCP}, {3, UDP}};                  // mixed
+
+        int NProtocol = nProtocol;
+        switch (NProtocol)
+        {
+        case 0:
+            tx2prot1 = {{1, UDP}, {2, UDP}, {3, UDP}};          // pure UDP
+            break;
+        case 1:
+            tx2prot1 = {{1, TCP}, {2, TCP}, {3, TCP}};          // pure TCP
+            break;
+        case 2:
+            tx2prot1 = {{1, TCP}, {2, TCP}, {3, UDP}};          // TTU passed
+            break;
+        case 3:
+            tx2prot1 = {{1, TCP}, {2, UDP}, {3, TCP}};          // TUT
+            break;
+        case 4:
+            tx2prot1 = {{1, UDP}, {2, TCP}, {3, TCP}};          // UTT
+            break;
+        case 5:
+            tx2prot1 = {{1, TCP}, {2, UDP}, {3, UDP}};          // TUU
+            break;
+        case 6:
+            tx2prot1 = {{1, UDP}, {2, TCP}, {3, UDP}};          // UTU
+            break;
+        case 7:
+            tx2prot1 = {{1, UDP}, {2, UDP}, {3, TCP}};          // UUT
+            break;
+        default:
+            break;
+        }
+
 
         g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);
         g1.insertLink({1, 2, 3}, {7, 8, 9});
@@ -1108,7 +1141,7 @@ int main (int argc, char *argv[])
     // LogComponentEnable("QueueDisc", LOG_FUNCTION);
 
     cout << "Initializing running module..." << endl;
-    RunningModule rm(t, grps, pt, bnBw, bnDelay, "2ms", {isTrackPkt, isBypass}, 1000);
+    RunningModule rm(t, grps, pt, bnBw, bnDelay, "2ms", {isTrackPkt, isBypass}, 1400);
     cout << "Building topology ... " << endl;
     rm.buildTopology(grps);
 
@@ -1128,12 +1161,12 @@ int main (int argc, char *argv[])
         num = vector<uint32_t> {2,2,1,1};
     else if(nGrp == 1)
         num = vector<uint32_t> {nTx, nTx, 1, nTx - 1};
-    mbox1 = MiddlePoliceBox(num, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax, isBypass}, alpha, scale);         // vector{nSender, nReceiver, nClient, nAttacker}
+    mbox1 = MiddlePoliceBox(num, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax, isBypass}, alpha, scale, estep);         // vector{nSender, nReceiver, nClient, nAttacker}
 
     vector<MiddlePoliceBox> mboxes({mbox1});
     if(nGrp == 2) 
     {
-        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID2, 50, {isEbrc, isTax, isBypass}, alpha, scale);
+        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID2, 50, {isEbrc, isTax, isBypass}, alpha, scale, estep);
         mboxes.push_back(mbox2);
     }
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
