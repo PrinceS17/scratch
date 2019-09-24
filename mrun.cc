@@ -166,7 +166,7 @@ Ipv4Address RunningModule::GetIpv4Addr(uint32_t i, uint32_t id, uint32_t k)
 uint32_t RunningModule::GetId()
 {   return ID; }
 
-RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, string delay, vector<bool> fls, uint32_t size)
+RunningModule::RunningModule(vector<double> t, vector<Group> grp, ProtocolType pt, vector<string> bnBw, vector<string> bnDelay, vector<string> delay, vector<bool> fls, uint32_t size)
 {
     // constant setting
     ID = rand() % 10000;
@@ -202,9 +202,12 @@ RunningModule::~RunningModule(){}
 
 void RunningModule::buildTopology(vector<Group> grp)
 {
-    PointToPointHelper leaf;
+    PointToPointHelper leaf, cross;
     leaf.SetDeviceAttribute("DataRate", StringValue(normalBw));
-    leaf.SetChannelAttribute("Delay", StringValue(delay));
+    leaf.SetChannelAttribute("Delay", StringValue(delay[0]));
+    cross.SetDeviceAttribute("DataRate", StringValue(normalBw));
+    cross.SetChannelAttribute("Delay", StringValue(delay[1]));
+    
     NodeContainer rt_ptr;
     NodeContainer leaf_ptr;
     stringstream ss;
@@ -235,7 +238,9 @@ void RunningModule::buildTopology(vector<Group> grp)
         for(uint32_t j = 0; j < g.txId.size(); j ++)    // left leaf nodes --> mbox
         {
             uint32_t idx = SetNode(0, i, j);
-            NetDeviceContainer ndc1 = leaf.Install(nodes.Get(idx), mb_router);
+            NetDeviceContainer ndc1;
+            if(j < g.N_ctrl) ndc1 = leaf.Install(nodes.Get(idx), mb_router);
+            else ndc1 = cross.Install(nodes.Get(idx), mb_router);
             txDevice.Add(ndc1.Get(0));
             txRouterDevice.Add(ndc1.Get(1));
             if(!i && !j) leaf_ptr.Add(nodes.Get(idx));
@@ -243,7 +248,9 @@ void RunningModule::buildTopology(vector<Group> grp)
         for(uint32_t j = 0; j < g.rxId.size(); j ++)    // rx router --> right leaf nodes
         {
             uint32_t idx = SetNode(1, i, j);
-            NetDeviceContainer ndc2 = leaf.Install(rx_router, nodes.Get(idx));
+            NetDeviceContainer ndc2;
+            if(j < g.N_ctrl) ndc2 = leaf.Install(rx_router, nodes.Get(idx));
+            else ndc2 = cross.Install(rx_router, nodes.Get(idx));
             rxRouterDevice.Add(ndc2.Get(0));
             rxDevice.Add(ndc2.Get(1));
             if(!i && !j) leaf_ptr.Add(nodes.Get(idx));
@@ -686,7 +693,7 @@ void RunningModule::connectMbox(vector<Group> grp, double interval, double logIn
         for(uint32_t j = 0; j < grp.at(i).txId.size(); j ++)
         {
             double bnDelay = (bottleneckDelay.at(i).c_str()[0] - '0') / 1000.0;
-            double dely = (delay.c_str()[0] - '0') / 1000.0;
+            double dely = (delay[0].c_str()[0] - '0') / 1000.0;
             double nRouter = 3;
             NS_LOG_INFO("rtt[" + to_string(j) + "]: " + to_string(2 *(bnDelay + nRouter * dely)));        // router is 3 now
             rtts.push_back(2 * (bnDelay + 2 * dely) );
@@ -858,7 +865,7 @@ void RunningModule::connectMboxCtrl(vector<Group> grp, double interval, double l
         for(uint32_t j = 0; j < nTrace; j ++)
         {
             double bnDelay = (bottleneckDelay.at(i).c_str()[0] - '0') / 1000.0;
-            double dely = (delay.c_str()[0] - '0') / 1000.0;
+            double dely = (delay[0].c_str()[0] - '0') / 1000.0;
             double nRouter = 3;
             NS_LOG_INFO("rtt[" + to_string(j) + "]: " + to_string(2 *(bnDelay + nRouter * dely)));        // router is 3 now
             rtts.push_back(2 * (bnDelay + 2 * dely) );
@@ -880,6 +887,7 @@ void RunningModule::connectMboxCtrl(vector<Group> grp, double interval, double l
 
         rxRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onPktRx, &mboxes.at(i)));
         qc.Get(2 * i)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onQueueDrop, &mboxes.at(i)));
+        qc.Get(2 * i + 1)->TraceConnectWithoutContext("Drop", MakeCallback(&MiddlePoliceBox::onRedDrop, &mboxes.at(i)));
         txRouter->TraceConnectWithoutContext("MacRx", MakeCallback(&MiddlePoliceBox::onMboxAck, &mboxes.at(i)));    // test passeds
 
         qc.Get(2 * i)->TraceConnectWithoutContext("PacketsInQueue", MakeCallback(&MiddlePoliceBox::TcPktInQ, &mboxes.at(i)));
@@ -1001,7 +1009,7 @@ int main (int argc, char *argv[])
     ProtocolType pt = UDP;
     int TCP_var = 1;
     FairType fairness = PRIORITY;
-    bool isTrackPkt = false;
+    bool isTrackPkt = true;
     bool isEbrc = false;            // don't use EBRC now, but also want to use loss assignment
     bool isTax = true;              // true: scheme 1, tax; false: scheme 2, counter
     bool isBypass = false;
@@ -1016,12 +1024,14 @@ int main (int argc, char *argv[])
     double alpha;
     uint32_t maxPkts = 1;
     double scale = 5e3;
+    int nWeight = 1;                // weight option w cross traffic: 0: fair share; 1: 6:3:1
     int nProtocol = 0;              // No. of scenario like TTT, TTU
     int nTraffic = 0;               // No. of traffic scenario like rate-change, typical
     double estep = 14;
-    uint32_t nCross = 1;
+    uint32_t nCross = 0;
     double ncRate = 20;             // unit in Mbps
     double ncType = 1;              // TCP: 1, UDP: 0
+    int ncDelay = 2;                // unit in ms
 
     // specify the TCP socket type in ns-3
     if(TCP_var == 1) Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));  
@@ -1051,12 +1061,14 @@ int main (int argc, char *argv[])
     cmd.AddValue ("rInt", "Rate update interval", rateUpInterval);
     cmd.AddValue ("weight1", "weight[1] for 2 weight run", wt[0]);
     cmd.AddValue ("weight2", "weight[2] for 2 weight run", wt[1]);
+    cmd.AddValue ("nWeight", "No. of the weights", nWeight);
     cmd.AddValue ("nProtocol", "No. of the protocol", nProtocol);
     cmd.AddValue ("eStep", "Step for UDP exploration", estep);               // explore step of UDP 
     cmd.AddValue ("nTraffic", "No. of the traffic scenario", nTraffic);
     cmd.AddValue ("nCross", "Number of cross traffic", nCross);
     cmd.AddValue ("crossRate", "Rate of cross traffic (all the same)", ncRate);
     cmd.AddValue ("crossType", "Type of cross traffic flow (all the same)", ncType);
+    cmd.AddValue ("crossDelay", "The delay of cross traffic", ncDelay);
 
     cmd.Parse (argc, argv);
 
@@ -1083,19 +1095,22 @@ int main (int argc, char *argv[])
     if (i > 0) nTx = i;
 
     // define bottleneck link bandwidth and delay, protocol, fairness
-    vector<string> bnBw, bnDelay;
+    vector<string> bnBw, bnDelay, delays;
+    string crossDelay = to_string(ncDelay) + "ms";
     if(nGrp == 1)
     {
         bnBw = {"120Mbps"};
         // bnBw = {"20Mbps"};
         // bnBw = {"2Mbps"};     // low rate test for queue drop and mac tx
         bnDelay = {"2ms"};
+        delays = {"2ms", crossDelay};
         alpha = rateUpInterval / 0.1;     // over the cover period we want
     }
     else if(nGrp == 2)
     {
         bnBw = {"100Mbps", "100Mbps"};
         bnDelay = {"2ms", "2ms"};
+        delays = {"2ms", crossDelay};
         alpha = rateUpInterval / 0.1; 
     }
 
@@ -1127,7 +1142,8 @@ int main (int argc, char *argv[])
             rxId1.push_back(rx_offset + i);
         }
         rate2port1 = {{normalRate, 80}, {crossRate, 90}};
-        weight = {0.6, 0.3, 0.1};
+        if (nWeight) weight = {0.6, 0.3, 0.1};
+        else weight = {0.333, 0.333, 0.334};
         
         // TCP: 1, UDP: 0
         tx2prot1.clear();
@@ -1174,10 +1190,10 @@ int main (int argc, char *argv[])
     else if(nTx == 3 && nGrp == 1) // group: 3, 1
     {
         rtid = {11, 5, 6};
-        tx2rate1 = {{1, "100Mbps"}, {2, "100Mbps"}, {3, "100Mbps"}, {4, "10Mbps"}};     // 4: cross traffic here
+        tx2rate1 = {{1, "100Mbps"}, {2, "100Mbps"}, {3, "100Mbps"}};     // 4: cross traffic here
         // tx2rate1 = {{1, "20Mbps"}, {2, "20Mbps"}, {3, "20Mbps"}};       // 20 Mbps for easy debugging
-        rxId1 = {7, 8, 9, 10};
-        rate2port1 = {{"100Mbps", 80}, {"10Mbps", 90}};
+        rxId1 = {7, 8, 9};
+        rate2port1 = {{"100Mbps", 80}};
         // rate2port1 = {{"20Mbps", 80}};
         // weight = {0.6, 0.2, 0.2};
         weight = {0.6, 0.3, 0.1};
@@ -1186,7 +1202,7 @@ int main (int argc, char *argv[])
         tx2prot1[4] = UDP;          // cross traffic flow type
 
         g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);
-        g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
+        g1.insertLink({1, 2, 3}, {7, 8, 9});
         grps = {g1};
     }
     else if(nTx == 3 && nGrp == 2) // group: 3, 2
@@ -1296,8 +1312,6 @@ int main (int argc, char *argv[])
         break;
     }
 
-
-
     // running module construction
     LogComponentEnable("RunningModule", LOG_LEVEL_INFO);
     LogComponentEnable("MiddlePoliceBox", LOG_INFO);
@@ -1305,7 +1319,7 @@ int main (int argc, char *argv[])
     // LogComponentEnable("QueueDisc", LOG_FUNCTION);
 
     cout << "Initializing running module..." << endl;
-    RunningModule rm(t, grps, pt, bnBw, bnDelay, "2ms", {isTrackPkt, isBypass}, 1400);
+    RunningModule rm(t, grps, pt, bnBw, bnDelay, delays, {isTrackPkt, isBypass}, 1400);
     cout << "Building topology ... " << endl;
     rm.buildTopology(grps);
 
