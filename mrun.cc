@@ -113,6 +113,8 @@ vector<uint32_t> CapabilityHelper::getCurAck()
 uint32_t RunningModule::SetNode(uint32_t i, uint32_t id)
 {
     Group g = groups.at(i);
+    if (id2nodeIndex.find(id) != id2nodeIndex.end())
+        return id2nodeIndex[id];
     nodes.Create(1);
     id2nodeIndex[id] = nodes.GetN() - 1;
     return nodes.GetN() - 1;
@@ -211,6 +213,7 @@ void RunningModule::buildTopology(vector<Group> grp)
     NodeContainer rt_ptr;
     NodeContainer leaf_ptr;
     stringstream ss;
+    InternetStackHelper stack;
 
     for(uint32_t i = 0; i < grp.size(); i ++)
     {
@@ -218,8 +221,6 @@ void RunningModule::buildTopology(vector<Group> grp)
         bottleneck.SetDeviceAttribute("DataRate", StringValue(bottleneckBw[i]));
         bottleneck.SetChannelAttribute("Delay", StringValue(bottleneckDelay[i]));
         bottleneck.SetDeviceAttribute("Mtu", StringValue(mtu));
-        InternetStackHelper stack;
-
 
         // add mbox node
         vector<uint32_t> rt_id(3);                      // mbox --> tx router --> rx router
@@ -227,7 +228,7 @@ void RunningModule::buildTopology(vector<Group> grp)
         {
             rt_id[j] = SetNode(2, i, j);
 
-            if(!i) rt_ptr.Add(nodes.Get(rt_id[j]));
+            rt_ptr.Add(nodes.Get(rt_id[j]));
         }
         Ptr<Node> mb_router = nodes.Get(rt_id[0]);
         Ptr<Node> tx_router = nodes.Get(rt_id[1]);
@@ -243,7 +244,7 @@ void RunningModule::buildTopology(vector<Group> grp)
             else ndc1 = cross.Install(nodes.Get(idx), mb_router);
             txDevice.Add(ndc1.Get(0));
             txRouterDevice.Add(ndc1.Get(1));
-            if(!i && !j) leaf_ptr.Add(nodes.Get(idx));
+            if(!i) leaf_ptr.Add(nodes.Get(idx));
         }
         for(uint32_t j = 0; j < g.rxId.size(); j ++)    // rx router --> right leaf nodes
         {
@@ -253,10 +254,10 @@ void RunningModule::buildTopology(vector<Group> grp)
             else ndc2 = cross.Install(rx_router, nodes.Get(idx));
             rxRouterDevice.Add(ndc2.Get(0));
             rxDevice.Add(ndc2.Get(1));
-            if(!i && !j) leaf_ptr.Add(nodes.Get(idx));
+            if(!i) leaf_ptr.Add(nodes.Get(idx));
         }
-        stack.Install(nodes);
     }
+    stack.Install(nodes);
 
 /*
         // tested: no mbox at first, only tx and rx router
@@ -293,21 +294,43 @@ void RunningModule::buildTopology(vector<Group> grp)
     // verify the node id and state
     NodeContainer TmpNode;
     TmpNode.Add( GetNode(0, grp[0].txId[0]) );
+    TmpNode.Add( GetNode(0, grp[0].txId[1]) );          // check it in double dumbbell topology
     TmpNode.Add( GetNode(0, grp[0].routerId[0]) );     // mbox router
     TmpNode.Add( GetNode(0, grp[0].routerId[1]) );     // tx router
     TmpNode.Add( GetNode(0, grp[0].routerId[2]) );     // rx router
     TmpNode.Add( GetNode(0, grp[0].rxId[0]) );
+    TmpNode.Add( GetNode(0, grp[0].rxId[1]) );
+  
+    uint32_t Nt = groups[0].txId.size();
 
     NS_ASSERT_MSG(TmpNode.Get(0) == leaf_ptr.Get(0), "Ptr<Node> for TX leaf (0,0) is incorrect!");
-    NS_ASSERT_MSG(TmpNode.Get(1) == rt_ptr.Get(0), "Ptr<Node> for mbox router is incorrect!");
-    NS_ASSERT_MSG(TmpNode.Get(2) == rt_ptr.Get(1), "Ptr<Node> for TX router is incorrect!");
-    NS_ASSERT_MSG(TmpNode.Get(3) == rt_ptr.Get(2), "Ptr<Node> for RX router is incorrect!");
-    NS_ASSERT_MSG(TmpNode.Get(4) == leaf_ptr.Get(1), "Ptr<Node> for RX leaf (0,0) is incorrect!");
+    NS_ASSERT_MSG(TmpNode.Get(1) == leaf_ptr.Get(1), "Ptr<Node> for TX leaf (0,1) is incorrect!");
+    
+    NS_ASSERT_MSG(TmpNode.Get(2) == rt_ptr.Get(0), "Ptr<Node> for mbox router is incorrect!");
+    NS_ASSERT_MSG(TmpNode.Get(3) == rt_ptr.Get(1), "Ptr<Node> for TX router is incorrect!");
+    NS_ASSERT_MSG(TmpNode.Get(4) == rt_ptr.Get(2), "Ptr<Node> for RX router is incorrect!");
+    
+    NS_ASSERT_MSG(TmpNode.Get(5) == leaf_ptr.Get(Nt), "Ptr<Node> for RX leaf (0,0) is incorrect!");
+    NS_ASSERT_MSG(TmpNode.Get(6) == leaf_ptr.Get(Nt + 1), "Ptr<Node> for RX leaf (0,1) is incorrect!");
+
+    vector<uint32_t> iter = {0,1,2,3,4,5,6};
+    if(groups.size() > 1)
+    {   
+        iter = {0,1,2,3,4,5,6,7,8,9};
+        TmpNode.Add( GetNode(1, grp[1].routerId[0]) );     // mbox router
+        TmpNode.Add( GetNode(1, grp[1].routerId[1]) );     // tx router
+        TmpNode.Add( GetNode(1, grp[1].routerId[2]) );     // rx router
+    
+
+        NS_ASSERT_MSG(TmpNode.Get(7) == rt_ptr.Get(3), "Ptr<Node> for mbox router is incorrect!");
+        NS_ASSERT_MSG(TmpNode.Get(8) == rt_ptr.Get(4), "Ptr<Node> for TX router is incorrect!");
+        NS_ASSERT_MSG(TmpNode.Get(9) == rt_ptr.Get(5), "Ptr<Node> for RX router is incorrect!");    
+    }
     NS_LOG_INFO("Ptr<Node> check passed.");
 
     // debug: address verification
     ss << "Node verification:  # dev    MAC addresses   MTU" << endl;
-    for(auto i: {0,1,2,3,4})
+    for(auto i: iter)
     {
         ss << "                    " << TmpNode.Get(i)->GetNDevices() << "        ";
         for(uint32_t j = 0; j < TmpNode.Get(i)->GetNDevices(); j ++)
@@ -386,8 +409,8 @@ QueueDiscContainer RunningModule::setQueue(vector<Group> grp, vector<string> bnB
         // qc.Add(tch.Install(GetNode(i, grp.at(i).routerId[0])->GetDevice(0)));
         // Ptr<NetDevice> mbRouter = GetNode(i, grp[i].routerId[0])->GetDevice(0);
         // Ptr<NetDevice> txRouter = GetNode(i, grp[i].routerId[1])->GetDevice(0);      // should word, but complicated
-        Ptr<NetDevice> mbRouter = routerDevice.Get(0);
-        Ptr<NetDevice> txRouter = routerDevice.Get(2);
+        Ptr<NetDevice> mbRouter = routerDevice.Get(4 * i);
+        Ptr<NetDevice> txRouter = routerDevice.Get(4 * i + 2);      // router dev: 4 for each group
 
         qc.Add(fq_tch.Install(mbRouter));
         qc.Add(red_tch.Install(txRouter));
@@ -411,10 +434,14 @@ Ipv4InterfaceContainer RunningModule::setAddress()
     type2name[3] = "Router";
     stringstream ss;
     vector<uint32_t> pt = {0, 0, 0, 0, 0};     // router, tx, tx-rt, rx, rx-rt, 
-    
+    vector<string> ipbase;
+
     for(uint32_t i = 0; i < groups.size(); i ++)
     {
         Group g = groups[i];
+    
+        for (uint32_t j : {1,2,3})
+            ipbase.push_back(to_string(10 * i + 11) + "." + to_string(j) + ".0.0");
 
         // mbox router and tx router
         NetDeviceContainer ndc0;
@@ -423,7 +450,8 @@ Ipv4InterfaceContainer RunningModule::setAddress()
         ifc.Add( ih.Assign(ndc0) );
         id2ipv4Index[make_pair(g.routerId[0], 0)] = index ++;   // mbox MacTx
         id2ipv4Index[make_pair(g.routerId[1], 0)] = index ++;   // tx router MacRx
-        ih.SetBase ("11.1.0.0", "255.255.255.0");
+        
+        ih.SetBase (ipbase[3 * i].c_str(), "255.255.255.0");
 
         // tx router and rx router
         NetDeviceContainer ndc1;
@@ -432,7 +460,7 @@ Ipv4InterfaceContainer RunningModule::setAddress()
         ifc.Add( ih.Assign(ndc1) );
         id2ipv4Index[make_pair(g.routerId[1], 1)] = index ++;   // tx router MacTx (late created)
         id2ipv4Index[make_pair(g.routerId[2], 0)] = index ++;   // rx router MacRx
-        ih.SetBase ("12.1.0.0", "255.255.255.0");
+        ih.SetBase (ipbase[3 * i + 1].c_str(), "255.255.255.0");
 
         for(uint32_t j = 0; j < g.txId.size(); j ++)
         {
@@ -445,7 +473,7 @@ Ipv4InterfaceContainer RunningModule::setAddress()
             id2ipv4Index[make_pair(g.routerId[0], j + 1)] = index ++;   // note: mbox is leftmost
             ih.NewNetwork();
         }
-        ih.SetBase ("13.1.0.0", "255.255.255.0");
+        ih.SetBase (ipbase[3 * i + 2].c_str(), "255.255.255.0");
         for(uint32_t j = 0; j < g.rxId.size(); j ++)
         {
             // rx and right router address
@@ -899,7 +927,7 @@ void RunningModule::connectMboxCtrl(vector<Group> grp, double interval, double l
             string context1 = "/NodeList/0/$ns3::TcpL4Protocol/SocketList/" + to_string(j) + "/CongestionWindow";
             string context2 = "/NodeList/0/$ns3::TcpL4Protocol/SocketList/" + to_string(j) + "/RTT";
 
-            Ptr<Socket> skt = senderApp.at(i * groups[0].N + j)->GetSocket();       // maybe limited for different groups
+            Ptr<Socket> skt = senderApp.at(i * groups[0].N_tx + j)->GetSocket();       // maybe limited for different groups: true
             skt->TraceConnect("CongestionWindow", context1, MakeCallback(&MiddlePoliceBox::onCwndChange, &mboxes.at(i)));
             skt->TraceConnect("RTT", context2, MakeCallback(&MiddlePoliceBox::onRttChange, &mboxes.at(i)));
         }       
@@ -1013,6 +1041,7 @@ int main (int argc, char *argv[])
     bool isEbrc = false;            // don't use EBRC now, but also want to use loss assignment
     bool isTax = true;              // true: scheme 1, tax; false: scheme 2, counter
     bool isBypass = false;
+    bool isMonitor = true;          // now default: stop the mbox
     uint32_t nTx = 3;               // sender number, i.e. link number
     uint32_t nGrp = 1;              // group number
     vector<double> Th;              // threshold of slr/llr
@@ -1025,7 +1054,7 @@ int main (int argc, char *argv[])
     uint32_t maxPkts = 1;
     double scale = 5e3;
     int nWeight = 1;                // weight option w cross traffic: 0: fair share; 1: 6:3:1
-    int nProtocol = 0;              // No. of scenario like TTT, TTU
+    int nProtocol = 7;              // No. of scenario like TTT, TTU
     int nTraffic = 0;               // No. of traffic scenario like rate-change, typical
     double estep = 14;
     uint32_t nCross = 0;
@@ -1034,9 +1063,6 @@ int main (int argc, char *argv[])
     int ncDelay = 2;                // unit in ms
 
     // specify the TCP socket type in ns-3
-    if(TCP_var == 1) Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));  
-    else if(TCP_var == 2) Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpVeno"));
-    else if(TCP_var == 3) Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpScalable"));  
     Config::SetDefault("ns3::TcpSocket::SegmentSize", UintegerValue (1400));   
     Config::SetDefault("ns3::TcpSocket::SndBufSize", UintegerValue(4096 * 1024));      // 128 (KB) by default, allow at most 85Mbps for 12ms rtt
     Config::SetDefault("ns3::TcpSocket::RcvBufSize", UintegerValue(4096 * 1024));      // here we use 4096 KB
@@ -1066,14 +1092,24 @@ int main (int argc, char *argv[])
     cmd.AddValue ("eStep", "Step for UDP exploration", estep);               // explore step of UDP 
     cmd.AddValue ("nTraffic", "No. of the traffic scenario", nTraffic);
     cmd.AddValue ("nCross", "Number of cross traffic", nCross);
+    cmd.AddValue ("nGroup", "Number of groups", nGrp);
     cmd.AddValue ("crossRate", "Rate of cross traffic (all the same)", ncRate);
     cmd.AddValue ("crossType", "Type of cross traffic flow (all the same)", ncType);
     cmd.AddValue ("crossDelay", "The delay of cross traffic", ncDelay);
+    cmd.AddValue ("isMonitor", "If we only monitor the flows", isMonitor);
+    cmd.AddValue ("tcp", "Type of TCP", TCP_var);
 
     cmd.Parse (argc, argv);
 
+    if(!TCP_var) Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpBbr"));
+    else if(TCP_var == 1) Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpNewReno"));  
+    else if(TCP_var == 2) Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpVeno"));
+    else if(TCP_var == 3) Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpScalable"));  
+    
+
     Th = {slrTh, llrTh};
     // t[1] = tStop;
+    cout << "TCP type: " << TCP_var? "TCP New Reno, etc" : "TCP BBR";
     cout << "Stop time: " << tStop << endl;
     cout << "MID 1: " << MID1 << endl;
     cout << "MID 2: " << MID2 << endl;
@@ -1083,6 +1119,7 @@ int main (int argc, char *argv[])
     cout << "nProtocol: " << nProtocol << endl;
     cout << "nTraffic: " << nTraffic << endl;
     cout << "nCross: " << nCross << endl;
+    cout << "isMonitor: " << isMonitor << endl;
 
     string crossRate = to_string(int(ncRate)) + "Mbps";
     ProtocolType crossType = ncType? TCP : UDP;
@@ -1158,6 +1195,26 @@ int main (int argc, char *argv[])
         grps = {g1};
 
     }
+    else if(nTx == 3 && nGrp == 2) // group: 3, 2; for double dumbbell simulations
+    {
+        rtid = {25, 49, 81};
+        tx2rate1 = {{10, "200Mbps"}, {11, "210Mbps"}};
+        rxId1 = {2,3};
+        rate2port1 = {{"200Mbps", 80}, {"210Mbps", 90}};
+        weight = {0.7, 0.3};
+        tx2prot1 = {{10, TCP}, {11, TCP}};
+        g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);
+        g1.insertLink({10, 11}, {2, 3});
+
+        rtid2 = {26, 50, 51};
+        tx2rate2 = {{11, "200Mbps"}, {12, "210Mbps"}};
+        rxId2 = {3,4};
+        rate2port2 = {{"200Mbps", 80}, {"210Mbps", 90}};
+        tx2prot2 = {{11, TCP}, {12, TCP}};
+        g2 = Group(rtid2, tx2rate2, tx2prot2, rxId2, rate2port2, weight);
+        g2.insertLink({11, 12}, {3, 4});
+        grps = {g1, g2};
+    }
     else if(nTx == 2 && nGrp == 1) // group: 2*1, 1
     {
         rtid = {4, 5, 6};
@@ -1175,6 +1232,22 @@ int main (int argc, char *argv[])
         g1.insertLink({1, 2}, {7, 8});
         grps = {g1};
     }
+    else if(nTx == 3 && nGrp == 1) // group: 3, 1
+    {
+        rtid = {11, 5, 6};
+        tx2rate1 = {{1, "100Mbps"}, {2, "100Mbps"}, {3, "100Mbps"}};     // 4: cross traffic here
+        // tx2rate1 = {{1, "20Mbps"}, {2, "20Mbps"}, {3, "20Mbps"}};       // 20 Mbps for easy debugging
+        rxId1 = {7, 8, 9};
+        rate2port1 = {{"100Mbps", 80}};
+        // rate2port1 = {{"20Mbps", 80}}; 
+        weight = {0.6, 0.3, 0.1};
+        // weight = {0.4, 0.3, 0.2, 0.1};
+        // tx2prot1[4] = UDP;          // cross traffic flow type
+
+        g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);
+        g1.insertLink({1, 2, 3}, {7, 8, 9});
+        grps = {g1};
+    }
     else if(nTx == 4 && nGrp == 1) // group: 2*2, 1
     {
         rtid = {11, 5, 6};
@@ -1187,51 +1260,13 @@ int main (int argc, char *argv[])
         g1.insertLink({1, 2, 3, 4}, {7, 8, 9, 10});
         grps = {g1};
     }
-    else if(nTx == 3 && nGrp == 1) // group: 3, 1
-    {
-        rtid = {11, 5, 6};
-        tx2rate1 = {{1, "100Mbps"}, {2, "100Mbps"}, {3, "100Mbps"}};     // 4: cross traffic here
-        // tx2rate1 = {{1, "20Mbps"}, {2, "20Mbps"}, {3, "20Mbps"}};       // 20 Mbps for easy debugging
-        rxId1 = {7, 8, 9};
-        rate2port1 = {{"100Mbps", 80}};
-        // rate2port1 = {{"20Mbps", 80}};
-        // weight = {0.6, 0.2, 0.2};
-        weight = {0.6, 0.3, 0.1};
-        // weight = {0.4, 0.3, 0.2, 0.1};
-
-        tx2prot1[4] = UDP;          // cross traffic flow type
-
-        g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);
-        g1.insertLink({1, 2, 3}, {7, 8, 9});
-        grps = {g1};
-    }
-    else if(nTx == 3 && nGrp == 2) // group: 3, 2
-    {
-        rtid = {25, 49, 81};
-        tx2rate1 = {{10, "200Mbps"}, {11, "400Mbps"}};
-        rxId1 = {2,3};
-        rate2port1 = {{"200Mbps", 80}, {"400Mbps", 90}};
-        weight = {0.7, 0.3};
-        tx2prot1 = {{10, TCP}, {11, TCP}};
-        g1 = Group(rtid, tx2rate1, tx2prot1, rxId1, rate2port1, weight);
-        g1.insertLink({10, 11}, {2, 3});
-
-        rtid2 = {26, 50};
-        tx2rate2 = {{10, "200Mbps"}, {12, "400Mbps"}};
-        rxId2 = {2,4};
-        rate2port2 = {{"200Mbps", 80}, {"400Mbps", 90}};
-        tx2prot2 = {{10, UDP}, {12, UDP}};
-        g2 = Group(rtid2, tx2rate2, tx2prot2, rxId2, rate2port2, weight);
-        g2.insertLink({10, 12}, {2, 4});
-        grps = {g1, g2};
-    }
     else if(nTx == 10)
     {
         rtid = {95, 96, 97};
         for(int i = 0; i < 10; i ++)
         {
             tx2rate1[i] = "100Mbps";
-            tx2prot1[i] = UDP;
+            tx2prot1[i] = TCP;
             txId1.push_back(i);
             rxId1.push_back(i + 10);
         }
@@ -1248,7 +1283,7 @@ int main (int argc, char *argv[])
         for(int i = 0; i < nTx; i ++)
         {
             tx2rate1[i] = "100Mbps";
-            tx2prot1[i] = UDP;
+            tx2prot1[i] = TCP;
             txId1.push_back(i);
             rxId1.push_back(i + nTx);
         }
@@ -1263,7 +1298,9 @@ int main (int argc, char *argv[])
     }
 
     // set start and stop times
-    uint32_t N = grps[0].txId.size();       // just use 1st group, cannot extend to multiple groups
+    uint32_t N;
+    for (uint32_t i = 0; i < grps.size(); i ++)
+        N += grps[i].txId.size();
     vector<double> t(2 + N * 2);
     t[0] = 0.0;
     t[1] = tStop;
@@ -1347,15 +1384,18 @@ int main (int argc, char *argv[])
         num = vector<uint32_t> {2,2,1,1};
     else if(nGrp == 1)
         num = vector<uint32_t> {nTx, nTx, 1, nTx - 1};
-    mbox1 = MiddlePoliceBox(num, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax, isBypass}, alpha, scale, estep);         // vector{nSender, nReceiver, nClient, nAttacker}
+    else if (nTx == 3)
+        num = vector<uint32_t> {2, 2, 1, 1};
+    mbox1 = MiddlePoliceBox(num, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID1, 50, {isEbrc, isTax, isBypass, isMonitor}, alpha, scale, estep);         // vector{nSender, nReceiver, nClient, nAttacker}
 
     cout << "Mbox 1 initialized!" << endl;
 
     vector<MiddlePoliceBox> mboxes({mbox1});
     if(nGrp == 2) 
     {
-        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID2, 50, {isEbrc, isTax, isBypass}, alpha, scale, estep);
+        mbox2 = MiddlePoliceBox(vector<uint32_t>{2,2,1,1}, t[1], pt, fairness, pSize, isTrackPkt, beta, Th, MID2, 50, {isEbrc, isTax, isBypass, isMonitor}, alpha, scale, estep);
         mboxes.push_back(mbox2);
+        cout << "Mbox 2 initialized!" << endl;
     }
     rm.configure(t[1], pt, bnBw, bnDelay, mboxes);
 
